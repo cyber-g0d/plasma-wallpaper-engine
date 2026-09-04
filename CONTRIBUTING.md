@@ -1,64 +1,58 @@
-# Contributing
+# Contributing to plasma-wallpaper-engine
 
-Thanks for wanting to help out. Here's what you need to know to get a change landed.
+## 🚧 Current Phase: Source Review
 
-## Getting set up
+We are in the **initial source review phase**. No code patches are being accepted yet. Here's what you can do:
+
+### What's needed now
+
+1. **Reproduce crashes** — find wallpapers or configurations that crash plasmashell, document exact steps.
+2. **Review the source** — read through `src/`, identify:
+   - Unsafe assumptions about plasmashell lifecycle
+   - Missing error handling in wallpaper loading/rendering paths
+   - Resource leaks (VRAM, file descriptors, threads)
+   - Signal-slot chains that could trigger cascading failures
+3. **Write reproducible tests** — for any identified issue, create a minimal reproducer.
+4. **Discuss architecture** — propose designs for out-of-process rendering, sandboxing, and resource limits in [Discussions](https://github.com/cyber-g0d/plasma-wallpaper-engine/discussions).
+
+### When code patches will be accepted
+
+After each source area has been reviewed and at least one reproducible test exists:
+
+- `src/` — wallpaper enumeration, loading, lifecycle
+- `plugin/` — KDE plugin integration, plasmashell interface
+- `src/backend_scene/` — Vulkan renderer safety
+
+See [ROADMAP.md](./ROADMAP.md) for the review schedule.
+
+## Build and Test
 
 ```sh
-git clone https://github.com/CaptSilver/wallpaper-engine-kde-plugin.git
-cd wallpaper-engine-kde-plugin
-git submodule update --init --force --recursive
-```
-
-Don't skip the submodule — the `backend_scene` Vulkan renderer is most of the codebase, and the build dies at `add_subdirectory(backend_scene)` without it. For binary installs, see the [README](README.md).
-
-## Build and test
-
-There's no cloud CI; everything runs locally through one script:
-
-```sh
-git config core.hooksPath tools/scripts/git-hooks   # install the pre-push hook
+git clone --recurse-submodules https://github.com/cyber-g0d/plasma-wallpaper-engine.git
+cd plasma-wallpaper-engine
+git checkout dev/plasmashell-safety
 cmake -B build -S .
-tools/scripts/preflight.sh                          # lint + build + tests + fuzz smoke, ~3–5 min
+tools/scripts/preflight.sh   # lint + build + tests + fuzz smoke
 ```
 
-The pre-push hook runs that same gate on every `git push`. It takes a few minutes and runs quietly — that's it working, not hanging — so resist the urge to reach for `--no-verify` on anything non-trivial. It catches real regressions.
+⚠️ **Do not install the plugin on a machine you depend on.** Test in a VM or a dedicated test user account.
 
-One gotcha: the gate runs long enough that GitHub sometimes drops an idle SSH connection mid-push (you'll see exit 141). Set this once and it stops happening:
+## Reporting Issues
 
-```sh
-git config core.sshCommand 'ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=60'
-```
+Use [GitHub Issues](https://github.com/cyber-g0d/plasma-wallpaper-engine/issues) with the following templates:
 
-## Formatting
+- **Bug Report** — crashes, hangs, visual glitches
+- **Safety Audit Finding** — code paths with missing safety guards
+- **Reproducer** — minimal wallpaper/setup that triggers a bug
 
-We use `.clang-format` — 4-space indent, 100-column lines. Format your changes with:
+Include:
+- KDE Plasma version (`plasmashell --version`)
+- Qt version
+- GPU + driver version
+- Wallpaper Workshop ID (if applicable)
+- Steps to reproduce
+- Backtrace if plasmashell crashed (`coredumpctl`)
 
-```sh
-tools/scripts/preflight.sh --fix
-```
+## Upstream
 
-Don't run `clang-format -i` across the whole tree; the formatter version drifts between machines and a blanket reformat trips the lint check on lines you never touched. Keep formatting in its own commit, separate from real changes.
-
-## Pull requests
-
-Commit straight to `main` or use a branch, whichever suits you — PRs target `main`. Small, focused PRs are far easier to review than one giant one.
-
-If your change touches `src/backend_scene/`, that's a separate repo ([wallpaper-scene-renderer](https://github.com/CaptSilver/wallpaper-scene-renderer)). Land the change there first, then bump the pointer here (`git add src/backend_scene`) in its own commit. Always push the submodule before the parent — a parent commit pointing at an unpushed submodule SHA breaks fresh clones.
-
-## Tests
-
-New code should come with tests. There are four places they live:
-
-| What | Where |
-|---|---|
-| C++ units | `tests/tst_<unit>.cpp` |
-| QML units | `tests/qml/tst_<unit>.qml` |
-| JavaScript units | `tests/js/<unit>.test.mjs` |
-| Renderer units | `src/backend_scene/src/Test/*.cpp` |
-
-No need to memorize how to run each — `preflight.sh` exercises them all. If you're fixing a wallpaper-specific bug, before/after evidence in the PR helps a lot: a screenshot, or output from one of the `WEKDE_*` diagnostic variables.
-
-## Security
-
-Found a vulnerability? Please don't open a public issue — see [SECURITY.md](SECURITY.md) for the private reporting path.
+This is a fork of [CaptSilver/wallpaper-engine-kde-plugin](https://github.com/CaptSilver/wallpaper-engine-kde-plugin) (GPL-2.0). Contributions that are not safety-specific should go upstream. Safety improvements will be offered back as patches.
