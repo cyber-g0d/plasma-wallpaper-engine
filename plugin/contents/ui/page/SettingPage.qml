@@ -675,6 +675,22 @@ Flickable {
         }
     }
 
+    // Connections is non-visual too; keep it outside OptionGroup's visual
+    // content list, just like the debounce Timer above.
+    Connections {
+        target: settingTab
+        function onWorkshopIdChanged() {
+            if (!settingTab.workshopId || !settingTab.pyext) {
+                perWallpaperGroup.perOpt = {};
+                return;
+            }
+            settingTab.pyext.read_wallpaper_config(settingTab.workshopId)
+                .then(function(res) {
+                    perWallpaperGroup.perOpt = (res && typeof res === "object") ? res : {};
+                });
+        }
+    }
+
     // ── Per-Wallpaper Overrides ────────────────────────────────────────────────
     // Visible only when a wallpaper is selected (workshopId is set).
     // Reads/writes <id>.json in configDir/wallpaper/ through FileHelper.
@@ -698,20 +714,6 @@ Flickable {
             if (!settingTab.pyext) return;
             settingTab.pyext.read_wallpaper_config(settingTab.workshopId)
                 .then(function(res) { perOpt = (res && typeof res === "object") ? res : {}; });
-        }
-
-        Connections {
-            target: settingTab
-            function onWorkshopIdChanged() {
-                if (!settingTab.workshopId || !settingTab.pyext) {
-                    perWallpaperGroup.perOpt = {};
-                    return;
-                }
-                settingTab.pyext.read_wallpaper_config(settingTab.workshopId)
-                    .then(function(res) {
-                        perWallpaperGroup.perOpt = (res && typeof res === "object") ? res : {};
-                    });
-            }
         }
 
         OptionItem {
