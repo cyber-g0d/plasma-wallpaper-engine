@@ -52,9 +52,12 @@
 **Goal:** Prevent wallpaper resource usage from degrading the desktop.
 
 - [ ] FPS limit for video wallpapers (configurable, default 30)
+- [ ] **Per-wallpaper FPS** — независимый лимит для scene-обоев, автоснижение при VRAM-давлении, ручная настройка через KDE-плагин; см. P-001, P-002
 - [ ] VRAM budget enforcement
+- [ ] **Heavy scene texture budget** — per-wallpaper лимит GPU-текстур (~256–512 MiB), downscale/streaming при превышении, предупреждение пользователю; см. P-002
+- [ ] **Graceful fallback chain** — fallback на предыдущий кадр/обои при OOM/allocation failure, сохранение последнего успешного кадра, авто-retry; см. P-002
 - [ ] CPU time budget for scene wallpapers
-- [ ] Idle detection — pause renderring when screen is locked / idle
+- [ ] Idle detection — pause rendering when screen is locked / idle
 - [ ] Web wallpaper memory limits (Qt WebEngine process limits)
 
 ## Phase 3: Process Isolation (planned)
@@ -126,6 +129,65 @@
 - [ ] Захватить GPU trace (RenderDoc / `VK_LAYER_LUNARG_api_dump`) на flicker-кадре
 - [ ] Сравнить GPU-тайминги между flicker-кадром и соседними стабильными
 - [ ] Профилировать распределение VMA: `VmaBudget`, `VmaDetailedStatistics`
+### P-002: Heavy Scene wallpaper texture exhaustion (Workshop 3156591944 — Hackercore)
+
+**Status:** Open — diagnostic phase, no code changes
+
+**Workshop ID:** 3156591944
+**Wallpaper type:** scene.pkg (~250 MiB compressed, ~1 GiB texture allocation at peak)
+**Memory footprint:** VMA allocation cap ~1 GiB during loading, RSS significantly above VMA
+**Frame pacing:** TBD — initial loading stresses allocator before first stable frame
+
+#### Диагностические признаки
+
+| Признак | Наблюдение | Что проверять |
+|---------|-----------|---------------|
+| scene.pkg ~250 MiB | На порядок тяжелее типичных сцен; содержит большое количество предзагруженных текстур, шейдеров, мешей | Профилировать загрузку: какие ассеты занимают больше всего места в архиве? Есть ли неиспользуемые ассеты? |
+| Texture allocation cap ~1 GiB | VMA-аллокатор достигает ~1 GiB при загрузке — близко к границе доступной VRAM на многих GPU | Мониторинг `VmaBudget` и `VmaDetailedStatistics` в процессе загрузки; определить пиковое потребление и момент стабилизации |
+| Загрузка до первого кадра | Потенциально долгий startup из-за массовой загрузки ассетов | Измерить wall-clock time от `init()` до первого `render()`; сравнить с лёгкими сценами |
+| RSS существенно выше VMA | Разница между RSS и VMA указывает на CPU-side дублирование или staging-буферы | Проверить, освобождаются ли staging-буферы после GPU-upload; нет ли утечек в цикле загрузки |
+
+#### Задачи
+
+1. **Texture / frame budget (Phase 2):**
+   - Ввести per-wallpaper лимит на суммарный размер GPU-текстур (~256–512 MiB по умолчанию, с возможностью повышения для тяжёлых сцен)
+   - При превышении в процессе загрузки — graceful degradation: downscale текстур, отложенная загрузка (streaming), или fallback-текстура низкого разрешения
+   - Предупреждение пользователю через KDE-плагин, если сцена требует больше VRAM, чем доступно
+   - Добавить `VmaBudget`-based мониторинг с предупреждением до фактического исчерпания
+
+2. **Graceful fallback на предыдущий кадр/обои:**
+   - Если wallpaper не может быть загружен (OOM, timeout, allocation failure) — fallback на предыдущие рабочие обои
+   - Сохранять последний успешный кадр как статический fallback
+   - Информировать пользователя через плагин о причине fallback'а
+   - Автоматический retry через настраиваемый интервал
+
+3. **Per-wallpaper FPS:**
+   - Независимый FPS-лимит для scene-обоев (отдельно от video)
+   - Значение по умолчанию для тяжёлых сцен — 24–30 FPS
+   - Возможность ручной настройки per-wallpaper через KDE-плагин
+   - Автоматическое снижение FPS при приближении к VRAM-лимиту
+
+4. **Диагностика VMA/RSS/frame pacing:**
+   - Per-wallpaper сбор статистики: VMA allocation count/size, RSS (process-wide), frame times (min/max/avg/P99), frame drops
+   - Экспорт в диагностический бандл (Phase 4)
+   - In-plugin индикатор здоровья: зелёный/жёлтый/красный по memory pressure и frame pacing
+   - Логирование аллокаций с тегами для отслеживания утечек
+
+5. **VRR / Adaptive Sync:**
+   - Учёт VRR (Variable Refresh Rate) и Adaptive Sync при выставлении FPS-лимита
+   - Автоопределение VRR-диапазона дисплея (напр. 48–144 Hz) через DRM/KMS или `VK_EXT_display_control`
+   - При активном VRR — таргетировать FPS в нижней половине VRR-диапазона для минимизации LFC (Low Framerate Compensation)
+   - Fallback: если VRR недоступен — использовать классический `VK_PRESENT_MODE_FIFO` с vblank-синхронизацией
+   - Документирование лучших практик FPS для VRR-дисплеев
+
+#### Regression test plan
+
+- [ ] Загрузить Workshop 3156591944 на GPU с 2/4/8 GiB VRAM и замерить `VmaBudget` до/после загрузки
+- [ ] Захватить GPU trace (RenderDoc) на момент пиковой аллокации — определить топ-10 крупнейших текстур
+- [ ] Профилировать startup latency: `init()` → первый кадр → стабильный FPS
+- [ ] Проверить поведение при принудительном ограничении VRAM через `VK_EXT_memory_budget` mock
+- [ ] Стресс-тест: циклическая смена wallpaper на 3156591944 и обратно — проверить отсутствие утечек (VMA + RSS)
+
 
 ---
 
@@ -140,5 +202,5 @@ Safety-critical patches land in `dev/plasmashell-safety`; renderer patches land 
 
 ---
 
-*Last updated: 2026-09-05*
+*Last updated: 2026-09-05 (P-002 added)*
 *Maintainer: [cyber-g0d](https://github.com/cyber-g0d)*

@@ -16,6 +16,7 @@
 ### Performance
 
 - **P-001 In-memory regression: Workshop 3242756527** — задокументирован случай периодического мерцания обоев на анимированном gifscene.pkg (~829 MiB, текстуры 4096×2048, VMA ~438 MB / RSS ~900 MB). Описаны диагностические признаки (render-target flicker, max-frame spikes, VMA/RSS divergence) и направления: texture/frame budget, GIF frame upload synchronization, render-target/present synchronization, fallback. Код не менялся — чистая документация для будущей работы по Phase 2. См. ROADMAP.md § Performance Regression Cases.
+- **P-002 In-memory regression: Workshop 3156591944 (Hackercore)** — задокументирован случай пикового потребления VRAM при загрузке тяжёлого scene.pkg (~250 MiB, ~1 GiB texture allocation cap). Описаны направления: texture/frame budget, graceful fallback на предыдущий кадр/обои, per-wallpaper FPS, диагностика VMA/RSS/frame pacing, учёт VRR/Adaptive Sync. Код не менялся — документационная задача для Phase 2. См. ROADMAP.md § Performance Regression Cases.
 
 ### Documentation
 
