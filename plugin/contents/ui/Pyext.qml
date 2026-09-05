@@ -112,6 +112,14 @@ Item {
         return _makePromise(bindings);
     }
 
+    // Read wallpaper user properties from project.json. Merges project.json
+    // defaults with saved per-wallpaper overrides. Returns a Promise that
+    // resolves to an array of property descriptors.
+    function read_wallpaper_properties(id, projectJsonPath) {
+        const props = fileHelper.readWallpaperProperties(id, projectJsonPath);
+        return _makePromise(props);
+    }
+
     function scan_video_folder(path) {
         const list = fileHelper.scanVideoFolder(path);
         return _makePromise(list);

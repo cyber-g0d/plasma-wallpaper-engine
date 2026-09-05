@@ -19,6 +19,22 @@ Flickable {
     // dialog (config.qml) — empty when no wallpaper is selected.
     property string workshopId: ""
     property var pyext: null
+    property var workshopRoots: []
+    // Resolve project.json path from workshop roots
+    readonly property string projectJsonPath: {
+        if (!workshopId || !Array.isArray(workshopRoots)) return "";
+        for (var i = 0; i < workshopRoots.length; i++) {
+            var root = workshopRoots[i];
+            if (!root || !root.path) continue;
+            var candidate = root.path + "/" + workshopId + "/project.json";
+            // Quick existence check via the model (workshopDirs carries 'valid' bool)
+            if (root.workshops && root.workshops.indexOf(workshopId) >= 0) {
+                return candidate;
+            }
+        }
+        return "";
+    }
+
     // Наследуем тему от родителя
     Kirigami.Theme.inherit: true
 
@@ -771,6 +787,43 @@ Flickable {
                     text: i18nc("@info per-wallpaper disable mouse help text",
                         "When enabled, mouse events are NOT forwarded to this wallpaper regardless of the global Mouse Input setting. Useful for interactive wallpapers that would interfere with desktop clicks.")
                     wrapMode: Text.Wrap
+                }
+            }
+        }
+
+        // ── User Properties from project.json ──────────────────────────
+        OptionItem {
+            visible: libcheck.wallpaper
+            text: i18nc("@label settings option per-wallpaper properties toggle", "Show Wallpaper Properties")
+            text_color: Kirigami.Theme.textColor
+            icon: '../../images/tuning.svg'
+            actor: Switch {
+                id: ckbox_showWallpaperProps
+                checked: false
+            }
+        }
+
+        Loader {
+            id: wallpaperPropsLoader
+            Layout.fillWidth: true
+            active: ckbox_showWallpaperProps.checked && settingTab.workshopId !== ""
+            visible: active
+            sourceComponent: Component {
+                UserPropertiesForm {
+                    id: userPropsForm
+                    workshopId: settingTab.workshopId
+                    pyext: settingTab.pyext
+                    projectJsonPath: settingTab.projectJsonPath
+                    // When a property changes, bump cfg_PerOptChanged so the
+                    // runtime re-reads and applies the new value.
+                    onPropChanged: function(key, val) {
+                        if (typeof cfg_PerOptChanged !== "undefined")
+                            cfg_PerOptChanged = cfg_PerOptChanged + 1;
+                    }
+                    onPropsReset: {
+                        if (typeof cfg_PerOptChanged !== "undefined")
+                            cfg_PerOptChanged = cfg_PerOptChanged + 1;
+                    }
                 }
             }
         }

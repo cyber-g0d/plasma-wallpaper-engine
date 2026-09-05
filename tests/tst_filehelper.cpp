@@ -2835,6 +2835,259 @@ private slots:
         helper.resetWallpaperConfig(id);
         helper.resetWallpaperConfig(id2);
     }
+
+    // ── readWallpaperProperties ────────────────────────────────────────────
+
+    void props_readEmpty() {
+        FileHelper helper;
+        QVERIFY(helper.readWallpaperProperties(QStringLiteral("noid"), QStringLiteral("/nonexistent.json")).isEmpty());
+    }
+
+    void props_missingPropertiesSection() {
+        QTemporaryFile f(m_tmp.filePath("no_props_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({"general":{"ambientcolor":"0.3 0.3 0.3"}})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVERIFY(helper.readWallpaperProperties("x", f.fileName()).isEmpty());
+    }
+
+    void props_emptyProperties() {
+        QTemporaryFile f(m_tmp.filePath("empty_props_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({"general":{"properties":{}}})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVERIFY(helper.readWallpaperProperties("x", f.fileName()).isEmpty());
+    }
+
+    void props_invalidJson() {
+        QTemporaryFile f(m_tmp.filePath("bad_json_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write("not json");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVERIFY(helper.readWallpaperProperties("x", f.fileName()).isEmpty());
+    }
+
+    void props_basicTypes() {
+        QTemporaryFile f(m_tmp.filePath("basic_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({
+  "general": {
+    "properties": {
+      "enableEffect": {"type": "bool", "value": true, "text": "Enable"},
+      "opacity": {"type": "slider", "value": 0.5, "text": "Opacity", "min": 0, "max": 1, "step": 0.01},
+      "mode": {"type": "combo", "value": "a", "text": "Mode", "options": [
+        {"value": "a", "label": "Alpha"},
+        {"value": "b", "label": "Beta"}
+      ]},
+      "tint": {"type": "color", "value": "1 0 0", "text": "Tint"},
+      "label": {"type": "text", "value": "Info text", "text": "Info"},
+      "bg": {"type": "group", "value": null, "text": "Group"}
+    }
+  }
+})");
+        f.close();
+
+        FileHelper    helper;
+        helper.addReadRoot(m_tmp.path());
+        QVariantList props = helper.readWallpaperProperties("test", f.fileName());
+
+        // text + group are skipped; 4 interactive types remain
+        QCOMPARE(props.size(), 4);
+
+        // Build a name->descriptor map (JSON object iteration order is unspecified)
+        QMap<QString, QVariantMap> byName;
+        for (const QVariant& v : props) { QVariantMap m = v.toMap(); byName[m["name"].toString()] = m; }
+
+        // Bool
+        QVariantMap b = byName["enableEffect"];
+        QCOMPARE(b["type"].toString(), QStringLiteral("bool"));
+        QCOMPARE(b["value"].toBool(), true);
+        QCOMPARE(b["default"].toBool(), true);
+        QCOMPARE(b["text"].toString(), QStringLiteral("Enable"));
+        QVERIFY(! b.contains("min"));
+        QVERIFY(! b.contains("options"));
+
+        // Slider
+        QVariantMap sl = byName["opacity"];
+        QCOMPARE(sl["type"].toString(), QStringLiteral("slider"));
+        QCOMPARE(sl["min"].toDouble(), 0.0);
+        QCOMPARE(sl["max"].toDouble(), 1.0);
+        QCOMPARE(sl["step"].toDouble(), 0.01);
+        QCOMPARE(sl["value"].toDouble(), 0.5);
+
+        // Combo
+        QVariantMap cm = byName["mode"];
+        QCOMPARE(cm["type"].toString(), QStringLiteral("combo"));
+        QVariantList opts = cm["options"].toList();
+        QCOMPARE(opts.size(), 2);
+        QVERIFY(opts[0].toMap()["label"].toString().contains("Alpha"));
+
+        // Color
+        QVariantMap cl = byName["tint"];
+        QCOMPARE(cl["type"].toString(), QStringLiteral("color"));
+        QCOMPARE(cl["value"].toString(), QStringLiteral("1 0 0"));
+    }
+
+    void props_overrideSavedValue() {
+        // Project.json default: speed=1.0
+        QTemporaryFile f(m_tmp.filePath("override_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({
+  "general": {
+    "properties": {
+      "speed": {"type": "slider", "value": 1.0, "text": "Speed", "min": 0.1, "max": 10, "step": 0.1}
+    }
+  }
+})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+
+        // No override yet — should see default 1.0
+        QVariantList p1 = helper.readWallpaperProperties("test_override", f.fileName());
+        QCOMPARE(p1.size(), 1);
+        QCOMPARE(p1[0].toMap()["value"].toDouble(), 1.0);
+        QCOMPARE(p1[0].toMap()["default"].toDouble(), 1.0);
+
+        // Write a saved override
+        QVariantMap cfg;
+        QVariantMap userProps;
+        userProps["speed"] = 5.0;
+        cfg["user_props"]    = userProps;
+        helper.writeWallpaperConfig("test_override", cfg);
+
+        // Now should see 5.0 (saved override wins)
+        QVariantList p2 = helper.readWallpaperProperties("test_override", f.fileName());
+        QCOMPARE(p2.size(), 1);
+        QCOMPARE(p2[0].toMap()["value"].toDouble(), 5.0);
+        QCOMPARE(p2[0].toMap()["default"].toDouble(), 1.0);
+
+        helper.resetWallpaperConfig("test_override");
+    }
+
+    void props_conditionMetadataPreserved() {
+        // Condition metadata is preserved in output even though the GUI
+        // does not evaluate it yet.
+        QTemporaryFile f(m_tmp.filePath("cond_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({
+  "general": {
+    "properties": {
+      "mode": {"type": "combo", "value": "a", "text": "Mode",
+        "options": [{"value": "a", "label": "A"}, {"value": "b", "label": "B"}]},
+      "brightness": {"type": "slider", "value": 0.5, "text": "Brightness",
+        "min": 0, "max": 1, "condition": "a"}
+    }
+  }
+})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVariantList props = helper.readWallpaperProperties("cond", f.fileName());
+        QCOMPARE(props.size(), 2);
+
+        QMap<QString, QVariantMap> byName;
+        for (const QVariant& v : props) { QVariantMap m = v.toMap(); byName[m["name"].toString()] = m; }
+
+        // mode has no condition
+        QVERIFY(! byName["mode"].contains("condition"));
+
+        // brightness has condition "a"
+        QCOMPARE(byName["brightness"]["condition"].toString(), QStringLiteral("a"));
+    }
+
+    void props_fileTypeMetadataPreserved() {
+        QTemporaryFile f(m_tmp.filePath("filetype_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({
+  "general": {
+    "properties": {
+      "video": {"type": "file", "value": "", "text": "Video File", "fileType": "video"}
+    }
+  }
+})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVariantList props = helper.readWallpaperProperties("ft", f.fileName());
+        QCOMPARE(props.size(), 1);
+        QCOMPARE(props[0].toMap()["fileType"].toString(), QStringLiteral("video"));
+    }
+
+    void props_missingTypeSkipped() {
+        QTemporaryFile f(m_tmp.filePath("notype_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({
+  "general": {
+    "properties": {
+      "noType": {"value": 123},
+      "withType": {"type": "bool", "value": true, "text": "Ok"}
+    }
+  }
+})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVariantList props = helper.readWallpaperProperties("nt", f.fileName());
+        QCOMPARE(props.size(), 1);
+        QCOMPARE(props[0].toMap()["name"].toString(), QStringLiteral("withType"));
+    }
+
+    void props_missingTextUsesNameAsLabel() {
+        QTemporaryFile f(m_tmp.filePath("notext_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({
+  "general": {
+    "properties": {
+      "myProp": {"type": "bool", "value": false}
+    }
+  }
+})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path());
+        QVariantList props = helper.readWallpaperProperties("ntx", f.fileName());
+        QCOMPARE(props.size(), 1);
+        // When  is missing, the key name is used
+        QCOMPARE(props[0].toMap()["text"].toString(), QStringLiteral("myProp"));
+    }
+
+    void props_outsideAllowlist_empty() {
+        QTemporaryDir td;
+        QVERIFY(td.isValid());
+        QTemporaryFile f(td.filePath("props_XXXXXX.json"));
+        f.setAutoRemove(false);
+        QVERIFY(f.open());
+        f.write(R"({"general":{"properties":{"x":{"type":"bool","value":true}}}})");
+        f.close();
+
+        FileHelper helper;
+        helper.addReadRoot(m_tmp.path()); // does NOT include td
+        QVERIFY(helper.readWallpaperProperties("x", f.fileName()).isEmpty());
+    }
 };
 
 QTEST_MAIN(TestFileHelper)

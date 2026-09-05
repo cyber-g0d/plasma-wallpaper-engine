@@ -633,6 +633,115 @@ QVariantList FileHelper::readActiveBindings(const QString& id) {
     return doc.array().toVariantList();
 }
 
+QVariantList FileHelper::readWallpaperProperties(const QString& id,
+                                                  const QString& projectJsonPath) {
+    // Read the project.json file through the allowlist gate.
+    const QByteArray raw = readFile(projectJsonPath);
+    if (raw.isEmpty()) {
+        qWarning() << "FileHelper::readWallpaperProperties: cannot read or access denied:"
+                   << projectJsonPath;
+        return QVariantList();
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (doc.isNull() || !doc.isObject()) {
+        qWarning() << "FileHelper::readWallpaperProperties: invalid JSON:" << projectJsonPath;
+        return QVariantList();
+    }
+
+    const QJsonObject root      = doc.object();
+    const QJsonValue  generalV  = root.value(QStringLiteral("general"));
+    if (!generalV.isObject()) return QVariantList();
+
+    const QJsonValue propsV = generalV.toObject().value(QStringLiteral("properties"));
+    if (!propsV.isObject()) return QVariantList();
+
+    const QJsonObject props     = propsV.toObject();
+    if (props.isEmpty()) return QVariantList();
+
+    // Load saved per-wallpaper overrides from <id>.json
+    const QVariantMap savedCfg = readWallpaperConfig(id);
+    const QVariantMap savedProps =
+        savedCfg.value(QStringLiteral("user_props")).toMap();
+
+    QVariantList result;
+    for (auto it = props.begin(); it != props.end(); ++it) {
+        const QJsonObject prop = it.value().toObject();
+        const QString     type = prop.value(QStringLiteral("type")).toString();
+
+        // Skip non-interactive types (informational text, group headers)
+        if (type.isEmpty() || type == QStringLiteral("text") ||
+            type == QStringLiteral("group")) {
+            continue;
+        }
+
+        QVariantMap desc;
+        desc[QStringLiteral("name")] = it.key();
+        desc[QStringLiteral("type")] = type;
+
+        // Display label: use `text` from project.json, or fall back to the key name
+        const QString rawText = prop.value(QStringLiteral("text")).toString();
+        desc[QStringLiteral("text")] =
+            rawText.isEmpty() ? it.key() : rawText;
+
+        // Values: saved override wins, else project.json default
+        const QJsonValue defaultValue = prop.value(QStringLiteral("value"));
+        const QVariant   savedValue   = savedProps.value(it.key());
+        const QVariant   resolvedValue =
+            savedValue.isValid() ? savedValue : defaultValue.toVariant();
+
+        desc[QStringLiteral("value")]   = resolvedValue;
+        desc[QStringLiteral("default")] = defaultValue.toVariant();
+
+        // Slider metadata
+        if (prop.contains(QStringLiteral("min")))
+            desc[QStringLiteral("min")] = prop.value(QStringLiteral("min")).toDouble();
+        if (prop.contains(QStringLiteral("max")))
+            desc[QStringLiteral("max")] = prop.value(QStringLiteral("max")).toDouble();
+        if (prop.contains(QStringLiteral("step")))
+            desc[QStringLiteral("step")] =
+                prop.value(QStringLiteral("step")).toDouble();
+
+        // Combo options
+        if (prop.contains(QStringLiteral("options"))) {
+            const QJsonArray opts = prop.value(QStringLiteral("options")).toArray();
+            QVariantList     optList;
+            for (const QJsonValue& ov : opts) {
+                QVariantMap om;
+                if (ov.isObject()) {
+                    const QJsonObject oo = ov.toObject();
+                    om[QStringLiteral("value")] = oo.value(QStringLiteral("value")).toVariant();
+                    om[QStringLiteral("label")] =
+                        oo.value(QStringLiteral("label")).toString();
+                } else {
+                    om[QStringLiteral("value")] = ov.toVariant();
+                    om[QStringLiteral("label")] = ov.toString();
+                }
+                optList.append(om);
+            }
+            desc[QStringLiteral("options")] = optList;
+        }
+
+        // File type filter
+        if (prop.contains(QStringLiteral("fileType"))) {
+            desc[QStringLiteral("fileType")] =
+                prop.value(QStringLiteral("fileType")).toString();
+        }
+
+        // Condition metadata (preserved for future visibility support).
+        // WPUserProperties::ResolveValue evaluates these at render time;
+        // the GUI does NOT evaluate conditions yet — see the header doc.
+        if (prop.contains(QStringLiteral("condition"))) {
+            desc[QStringLiteral("condition")] =
+                prop.value(QStringLiteral("condition")).toString();
+        }
+
+        result.append(desc);
+    }
+
+    return result;
+}
+
 void FileHelper::generateThumbnail(const QString& videoPath, const QString& outPath,
                                    double atSeconds) {
     // Short-circuit if cached thumbnail already exists.
