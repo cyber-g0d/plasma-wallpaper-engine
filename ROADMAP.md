@@ -188,6 +188,151 @@
 - [ ] Проверить поведение при принудительном ограничении VRAM через `VK_EXT_memory_budget` mock
 - [ ] Стресс-тест: циклическая смена wallpaper на 3156591944 и обратно — проверить отсутствие утечек (VMA + RSS)
 
+### P-003: Intermittent wallpaper-only flicker on light scene — `deep_space` (Workshop TBD)
+
+**Status:** Open — needs Workshop ID confirmation
+
+**Workshop ID:** TBD — отсутствует в локальном каталоге Steam Workshop. Требуется подтверждение от пользователя.
+**Wallpaper nickname:** `deep_space`
+**Wallpaper type:** TBD (предположительно scene или video, лёгкая сцена)
+**Texture resolution:** TBD — заведомо ниже 4096×2048 (лёгкая сцена)
+**Memory footprint:** TBD — ожидается значительно ниже VMA ~438 MiB / RSS ~900 MiB эталона P-001
+**Frame pacing:** TBD — intermittent flicker при стабильном в среднем FPS
+
+#### Отличие от P-001
+
+P-001 привязан к тяжёлому gifscene.pkg (Workshop 3242756527) с текстурами 4096×2048 и VMA ~438 MiB. Фликер там объясним через VMA-фрагментацию, staging-дублирование и гонку acquire-present.
+
+P-003 — flicker на **лёгкой сцене**, где memory pressure не должен быть фактором. Это указывает на другую природу flicker'а, не связанную с исчерпанием ресурсов:
+- Возможен race condition в swapchain-recreation, не привязанный к объёму VRAM
+- Возможен баг в логике presentation scheduling, не зависящий от сложности сцены
+- Возможна проблема с compositor-взаимодействием (KWin) — например, неверный damage-region или partial-update, вызывающий пропуск кадра на стороне композитора
+
+#### Диагностические признаки (предварительные)
+
+| Признак | Ожидание для лёгкой сцены | Что проверять |
+|---------|--------------------------|---------------|
+| Flicker только обоев, панели стабильны | Как в P-001 — изоляция в render target | Проверить, общий ли это баг presentation pipeline, не зависящий от нагрузки |
+| Лёгкая сцена (предположительно) | VMA < 100 MiB, RSS < 200 MiB | Исключить memory pressure как причину; если flicker воспроизводится — значит корневая причина не в VMA |
+| Intermittent, нерегулярный | Не привязан к конкретным кадрам или фазам загрузки | Искать недерминированные факторы: системные события, композитор-режимы, vblank-тайминг |
+| Стабильный средний FPS | Нет max-frame spikes, в отличие от P-001 | Искать проблему в present-path, а не render-path: `vkQueuePresentKHR`, surface capabilities, режим FIFO/MAILBOX |
+
+#### Будущие направления
+
+1. **Swapchain / surface recreation audit:**
+   - Проверить, не пересоздаётся ли swapchain чаще необходимого (напр. на каждый `resizeEvent`, даже без изменения размера)
+   - Верифицировать `VkSurfaceCapabilitiesKHR::currentExtent` — не возвращает ли композитор (0,0) или stale-значения
+   - Проверить обработку `VK_ERROR_OUT_OF_DATE_KHR` и `VK_SUBOPTIMAL_KHR` — нет ли ложных срабатываний
+
+2. **Presentation scheduling:**
+   - Сравнить `VK_PRESENT_MODE_FIFO` vs `MAILBOX` на проблемной сцене — исчезает ли flicker при смене режима
+   - Проверить, не вызывает ли KWin partial-update damage tracking некорректную отрисовку области обоев
+   - Исключить vblank-miss из-за scheduling jitter: замерить `present_id` / `present_time` через `VK_EXT_present_timing`
+
+3. **Compositor (KWin) interaction:**
+   - Проверить damage-region: не отправляет ли плагин пустой/нулевой damage, заставляя KWin перерисовывать всю область
+   - Верифицировать `wl_surface::damage_buffer` и `zwp_linux_buffer_params_v1` — корректность buffer-release цикла
+   - Исключить гонку между buffer-release KWin и acquire-next-image плагина
+
+4. **Minimal reproducer:**
+   - Создать минимальную сцену (один треугольник, статическая текстура), которая даёт flicker
+   - Если не даёт — значит проблема в чём-то специфичном для ассетов `deep_space`
+   - Бисекция ассетов `deep_space`: отключать слои/эффекты по одному, пока flicker не исчезнет
+
+#### Regression test plan
+
+- [ ] Подтвердить Workshop ID `deep_space` и подписаться в Steam
+- [ ] Воспроизвести flicker на лёгкой сцене с включённым `VK_LAYER_LUNARG_monitor`
+- [ ] Сравнить swapchain-метрики (create/destroy count, present-timing) между flicker-сессией и стабильной
+- [ ] Протестировать оба presentation mode (FIFO / MAILBOX) — записать, исчезает ли flicker
+- [ ] Захватить KWin debug log (`KWIN_LOG=debug`) в момент flicker'а — проверить damage-region и buffer-release
+- [ ] Создать minimal reproducer сцену для изоляции корневой причины
+
+## Feature Requirements: Per-Wallpaper Configuration & Future Flags
+
+### FR-001: Per-Wallpaper FPS Limit
+
+**Приоритет:** Phase 2 (Resource Limits)
+
+- Независимый FPS-лимит для каждого типа обоев: scene, video, web
+- Значения по умолчанию:
+  - Scene: 30 FPS (тяжёлые) / 60 FPS (лёгкие, автоопределение)
+  - Video: 30 FPS (совпадает с типичным фреймрейтом видео)
+  - Web: 15 FPS (щадящий режим для QtWebEngine)
+- Возможность ручной настройки per-wallpaper через KDE-плагин
+- Автоматическое снижение FPS при приближении к VRAM-лимиту (throttling)
+- Учёт VRR/Adaptive Sync: автоопределение VRR-диапазона, таргетинг в нижней половине диапазона для экономии энергии
+
+### FR-002: disableMouse Flag
+
+**Приоритет:** Phase 2 (Resource Limits)
+
+- Per-wallpaper флаг, отключающий обработку событий мыши для обоев (движение, клики, drag)
+- Мотивация:
+  - Снижение CPU-нагрузки от ненужной обработки событий (особенно для scene-обоев с particle-эффектами, реагирующими на мышь)
+  - Устранение потенциального источника jitter/flicker: обработка mouse-event в render-потоке может вызывать микро-задержки
+  - Экономия энергии на ноутбуках (пробуждение CPU на каждое движение мыши)
+- По умолчанию: `false` (мышь включена) для обратной совместимости
+- GUI: чекбокс в KDE-плагине, per-wallpaper
+
+### FR-003: Future Audio-Reactive Flags
+
+**Приоритет:** Phase 3+ (Process Isolation)
+
+- Per-wallpaper флаги для аудио-реактивных обоев (визуализация спектра, waveform, audio-driven particles)
+- Планируемые флаги:
+  - `audioReactive` (bool) — включает/отключает audio pipeline для обоев
+  - `audioSource` (enum: `system`, `microphone`, `application`) — источник аудио
+  - `audioSensitivity` (float 0.0–2.0) — множитель чувствительности
+  - `audioSmoothing` (float 0.0–1.0) — сглаживание амплитуд (экспоненциальное скользящее среднее)
+  - `audioBands` (int 8–256) — количество частотных полос для FFT
+- Требования:
+  - Аудио-захват должен работать в изолированном процессе (Phase 3), чтобы не блокировать plasmashell
+  - Низкая latency (< 16 ms) через PulseAudio/PipeWire real-time scheduling
+  - Автоматическое отключение audio pipeline при `disableMouse` + отсутствии других потребителей — экономия CPU
+
+### FR-004: Future Parallax Flags
+
+**Приоритет:** Phase 3+ (Process Isolation)
+
+- Per-wallpaper флаги для параллакс-эффекта (смещение слоёв относительно движения мыши / акселерометра)
+- Планируемые флаги:
+  - `parallaxEnabled` (bool) — включает параллакс
+  - `parallaxStrength` (float 0.0–2.0) — сила эффекта
+  - `parallaxMode` (enum: `mouse`, `accelerometer`, `both`) — источник движения
+  - `parallaxLayers` (int 2–10) — количество слоёв для depth-based смещения
+- Требования:
+  - Параллакс должен учитывать `disableMouse`: если мышь отключена, parallax через `mouse` недоступен
+  - Аппаратное ускорение через GPU (vertex-shader displacement), без CPU-side обработки
+  - Совместимость с VRR: плавное смещение без разрывов на любом FPS
+
+### FR-005: Per-Wallpaper Persistence & GUI
+
+**Приоритет:** Phase 1 (Defensive Hardening) — базовая версия; Phase 4 — расширенная
+
+- Сохранение per-wallpaper настроек (FPS, disableMouse, audio, parallax) в локальном конфиге (JSON/QSettings)
+- Структура конфига:
+  ```json
+  {
+    "workshopId": "TBD",
+    "fpsLimit": 30,
+    "disableMouse": false,
+    "audioReactive": false,
+    "parallaxEnabled": false
+  }
+  ```
+- Путь: `~/.config/wallpaper-engine-kde/workshop/<workshopId>.json`
+- Миграция: при обновлении плагина — автоматический перенос старых настроек в новую схему
+- GUI (KDE-плагин):
+  - Вкладка «Wallpaper Settings» в окне настройки обоев
+  - Элементы: FPS slider (1–120), disableMouse checkbox
+  - Расширенные настройки (audio, parallax) — в collapsible-секции «Advanced»
+  - Индикатор здоровья обоев (Phase 4): FPS, VRAM, crash count — overlay в preview
+  - Кнопка «Reset to Defaults» для сброса per-wallpaper настроек
+- Persistence между сессиями plasmashell: настройки загружаются при старте wallpaper, сохраняются при изменении
+- Валидация: при загрузке конфига — проверка границ значений, fallback на defaults при повреждённом JSON
+
+
 
 ---
 
@@ -202,5 +347,5 @@ Safety-critical patches land in `dev/plasmashell-safety`; renderer patches land 
 
 ---
 
-*Last updated: 2026-09-05 (P-002 added)*
+*Last updated: 2026-09-05 (P-002, P-003 added; FR-001–FR-005)*
 *Maintainer: [cyber-g0d](https://github.com/cyber-g0d)*
