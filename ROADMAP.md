@@ -39,6 +39,7 @@
 **Goal:** Prevent wallpaper bugs from crashing plasmashell.
 
 - [x] **Null-texture guard in TextureNode** — guard QSGSimpleTextureNode::setTexture against null texure in headless/offsreen GL (commit b79d5ae, renderer fork `dev/null-texture-guard`)
+- [ ] **Razer Visualiser (3D): User Properties & Configuration** — сохранять и применять Wallpaper Engine user properties/configuration из `project.json`, отображать их в KDE-плагине, обеспечить per-wallpaper persistence. См. `doc/razer-visualiser-properties-checklist.md` для regression-тестирования.
 - [ ] Catch-all error handling in wallpaper loading paths
 - [ ] Gracefful fallback to static color/blank on wallpaper load failure
 - [ ] Signal-slot safety audit — verify no cascading failures

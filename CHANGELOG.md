@@ -2,6 +2,10 @@
 
 ## [unreleased] -- dev/plasmashell-safety
 
+### Planned
+
+- **Razer Visualiser (3D): User Properties & Configuration** — сохранение и применение пользовательских свойств/конфигурации Wallpaper Engine из `project.json`, отображение в KDE-плагине, per-wallpaper persistence. Regression checklist: `doc/razer-visualiser-properties-checklist.md`.
+
 ### Security / Safety
 
 - **Null-texture guard (renderer submodule):** Guard `QSGSimpleTextureNode::setTexture` against null texture in headless/offscreen GL environments. Previously, `TextureNode` called `createTextureFromGl(0, ...)` as a placeholder seed; when `fromNative` returned `nullptr` (no Mesa llvmpipe, CI, Qt offscreen platform), the null pointer was passed to `setTexture` which dereferences it and crashes plasmashell with SIGSEGV. Now the node degrades to transparent with a warning instead of crashing. Commit `b79d5ae` in wallpaper-scene-renderer fork, branch `dev/null-texture-guard`.
