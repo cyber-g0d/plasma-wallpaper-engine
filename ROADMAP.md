@@ -31,21 +31,21 @@
 | `SafeWallpaperBridge` (web QWebChannel) | ✅ Hardened: READ-only properties, no Q_INVOKABLE, grep-able surface |
 | `parseValveKV` (ACF parser) | ⚠️ Uses `std::function` recursion — deep nesting could stack-overflow. Mitigated by the 1 MiB input size cap (a real ACF with thousands of entries is < 200 KB; deeply nested attacks need more bytes than the cap allows) |
 | `TextureNode` (QSGSimpleTextureNode) | ✅ Hardened: null-texture guard prevents SIGSEGV in headless/offscreen GL (b79d5ae); degrades to transparent instead of crashing plasmashell |
-| `MpvBackend` (libmpv video) | �️ In-processs with plasmashell — libmpv crashes take down the desktop. Mitigation: upstream has render-thread unblocking on shutdown (6fc5cea) |
-| `QtWebEngine` (web wallpapers) | �️ In-procss with plasmashell — `--disable-web-security` flag is requied for workshop compatibility. Mitigation: `WebUrlIntrceptor` filters file:// requests |
+| `MpvBackend` (libmpv video) | ⚠️ In-process with plasmashell — libmpv crashes take down the desktop. Mitigation: upstream has render-thread unblocking on shutdown (6fc5cea) |
+| `QtWebEngine` (web wallpapers) | ⚠️ In-process with plasmashell — `--disable-web-security` flag is required for workshop compatibility. Mitigation: `WebUrlInterceptor` filters file:// requests |
 
-## Phase 1: Defnsive Hardening (in progress)
+## Phase 1: Defensive Hardening (in progress)
 
 **Goal:** Prevent wallpaper bugs from crashing plasmashell.
 
-- [x] **Null-texture guard in TextureNode** — guard QSGSimpleTextureNode::setTexture against null texure in headless/offsreen GL (commit b79d5ae, renderer fork `dev/null-texture-guard`)
+- [x] **Null-texture guard in TextureNode** — guard QSGSimpleTextureNode::setTexture against null texture in headless/offscreen GL (commit b79d5ae, renderer fork `dev/null-texture-guard`)
 - [ ] **Razer Visualiser (3D): User Properties & Configuration** — сохранять и применять Wallpaper Engine user properties/configuration из `project.json`, отображать их в KDE-плагине, обеспечить per-wallpaper persistence. См. `doc/razer-visualiser-properties-checklist.md` для regression-тестирования.
 - [ ] Catch-all error handling in wallpaper loading paths
-- [ ] Gracefful fallback to static color/blank on wallpaper load failure
+- [ ] Graceful fallback to static color/blank on wallpaper load failure
 - [ ] Signal-slot safety audit — verify no cascading failures
 - [ ] Thread-safety review — wallpaper enumeration runs off main thread?
 - [x] Steam library enumeration hardening — handle corrupt/missing workshop data (Phase 0)
-- [ ] Fuzz harness for wallpaper propery parsing
+- [ ] Fuzz harness for wallpaper property parsing
 
 ## Phase 2: Resource Limits (planned)
 
@@ -54,7 +54,7 @@
 - [ ] FPS limit for video wallpapers (configurable, default 30)
 - [ ] VRAM budget enforcement
 - [ ] CPU time budget for scene wallpapers
-- [ ] Idle detection — pause rendering when screen is locked / idle
+- [ ] Idle detection — pause renderring when screen is locked / idle
 - [ ] Web wallpaper memory limits (Qt WebEngine process limits)
 
 ## Phase 3: Process Isolation (planned)
@@ -66,7 +66,7 @@
 - [ ] Crash recovery — restart renderer without plasmashell restart
 - [ ] Shared memory / DMA-BUF for zero-copy frame delivery
 
-## Phase 4: Observabillity (planned)
+## Phase 4: Observability (planned)
 
 **Goal:** Make wallpaper health visible and debuggable.
 
@@ -74,12 +74,67 @@
 - [ ] Diagnostic bundle — collect logs, backtraces, system info for bug reports
 - [ ] Plasma widget for wallpaper health overlay
 
+## Performance Regression Cases
+
+### P-001: Intermittent wallpaper-only flicker (Workshop 3242756527)
+
+**Status:** Open — diagnostic phase, no code changes
+
+**Workshop ID:** 3242756527
+**Wallpaper type:** animated gifscene.pkg (~829 MiB)
+**Texture resolution:** 4096×2048 (per-frame)
+**Memory footprint:** VMA ~438 MB, RSS ~900 MB
+**Frame pacing:** mostly stable 30/24 FPS, occasional max-frame spikes
+
+#### Диагностические признаки
+
+| Признак | Наблюдение | Что проверять |
+|---------|-----------|---------------|
+| Мерцание только обоев | Панели/виджеты Plasma не затрагиваются — проблема изолирована в render target обоев | Проверить, не сбрасывается ли `VkFramebuffer`/`VkRenderPass` между кадрами; не гоняется ли `vkQueueSubmit` за acquire-present циклом |
+| Привязка к анимированному gifscene.pkg | Статические сцены и видео не дают flicker | Сравнить pipeline загрузки GIF-кадров с обычным scene-рендерингом: формат, mip-уровни, тайлинг текстур |
+| Текстуры 4096×2048 | ~32 MB на кадр в RGBA8; несколько таких в пуле быстро насыщают VRAM | Проверить VMA-статистику: фрагментацию, количество аллокаций, хиты в `VMA_MEMORY_USAGE_GPU_ONLY` |
+| VMA ~438 MB при RSS ~900 MB | VMA учитывает только GPU-аллокации; разница ~460 MB — CPU-side копии, staging-буферы, Qt-структуры | Проверить, не дублируются ли GIF-кадры в CPU-памяти после upload на GPU |
+| Max-frame spikes при стабильном average | Периодические «длинные» кадры на фоне ровного 30/24 FPS | Искать блокирующие операции на render-потоке: синхронная загрузка с диска, ожидание fence, пересоздание swapchain |
+
+#### Будущие направления
+
+1. **Texture / frame budget (Phase 2):**
+   - Ввести лимит на суммарный размер GPU-текстур на сцену (~256–512 MB)
+   - При превышении — downscale текстур или throttling частоты загрузки GIF-кадров
+   - Добавить `VmaBudget`-based мониторинг с предупреждением до фактического исчерпания
+
+2. **GIF frame upload synchronization:**
+   - Проверить, не загружаются ли GIF-кадры синхронно в render-поток (блокирующий `glTexImage2D`/`vkCmdCopyBufferToImage` без стейджинга)
+   - Рассмотреть асинхронный upload через dedicated transfer queue + двойную буферизацию staging-буферов
+   - Профилировать `gifscene.pkg`-специфичный кодек: возможно, узкое место — декодирование, а не upload
+
+3. **Render target / present synchronization:**
+   - Аудит `vkAcquireNextImageKHR` → render → `vkQueuePresentKHR` цепочки:
+     - Не вызывается ли `vkDeviceWaitIdle` между кадрами
+     - Правильно ли расставлены `VkSemaphore`/`VkFence` (нет ли double-wait или missing signal)
+   - Проверить режим презентации (`VK_PRESENT_MODE_FIFO` vs `MAILBOX` vs `IMMEDIATE`): flicker на FIFO может указывать на пропуск vblank из-за late submit
+   - Исключить неявный `vkQueueWaitIdle` в hot path (например, внутри VMA-дефрагментации)
+
+4. **Fallback:**
+   - При детекции flicker > N кадров подряд — переход на статический кадр с градиентной заливкой
+   - При исчерпании VRAM — graceful degradation: пропуск кадров, fallback-текстура низкого разрешения
+   - Логирование статистики кадров в диагностический бандл (Phase 4)
+
+#### Regression test plan
+
+- [ ] Воспроизвести на том же Workshop ID с включённым `VK_LAYER_LUNARG_monitor`
+- [ ] Захватить GPU trace (RenderDoc / `VK_LAYER_LUNARG_api_dump`) на flicker-кадре
+- [ ] Сравнить GPU-тайминги между flicker-кадром и соседними стабильными
+- [ ] Профилировать распределение VMA: `VmaBudget`, `VmaDetailedStatistics`
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). During Phase 1, contributions are welcome for:
 - Defensive hardening patches (null guards, error recovery, fallbacks)
 - Reproducible crash test cases
-- Architecture discussions for Phase 2-4
+- Architecture discussions for Phase2–4
 
 Safety-critical patches land in `dev/plasmashell-safety`; renderer patches land in `dev/null-texture-guard` (renderer fork).
 

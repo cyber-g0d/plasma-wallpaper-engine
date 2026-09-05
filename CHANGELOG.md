@@ -1,6 +1,6 @@
-# Changelog -- plasma-wallpaper-engine
+# Changelog — plasma-wallpaper-engine
 
-## [unreleased] -- dev/plasmashell-safety
+## [unreleased] — dev/plasmashell-safety
 
 ### Planned
 
@@ -8,10 +8,14 @@
 
 ### Security / Safety
 
-- **Null-texture guard (renderer submodule):** Guard `QSGSimpleTextureNode::setTexture` against null texture in headless/offscreen GL environments. Previously, `TextureNode` called `createTextureFromGl(0, ...)` as a placeholder seed; when `fromNative` returned `nullptr` (no Mesa llvmpipe, CI, Qt offscreen platform), the null pointer was passed to `setTexture` which dereferences it and crashes plasmashell with SIGSEGV. Now the node degrades to transparent with a warning instead of crashing. Commit `b79d5ae` in wallpaper-scene-renderer fork, branch `dev/null-texture-guard`.
-- **SafeWallpaperBridge:** Read-only QWebChannel surface -- properties are `READ`-only, no `Q_INVOKABLE` methods, grep-able audit surface (`bef5fd5`)
+- **Null-texture guard (renderer submodule):** Guard `QSGSimpleTextureNode::setTexture` against null texture in headless/offscreen GL environments. Previously, `TextureNode` called `createTextureFromGl(0, …)` as a placeholder seed; when `fromNative` returned `nullptr` (no Mesa llvmpipe, CI, Qt offscreen platform), the null pointer was passed to `setTexture` which dereferences it and crashes plasmashell with SIGSEGV. Now the node degrades to transparent with a warning instead of crashing. Commit `b79d5ae` in wallpaper-scene-renderer fork, branch `dev/null-texture-guard`.
+- **SafeWallpaperBridge:** Read-only QWebChannel surface — properties are `READ`-only, no `Q_INVOKABLE` methods, grep-able audit surface (`bef5fd5`)
 - **FileHelper::readFile:** Allowlist + canonical symlink resolution + 64 MiB cap (`bef5fd5`)
 - **Workshop manifest:** Canonical path resolution + 1 MiB ACF size cap
+
+### Performance
+
+- **P-001 In-memory regression: Workshop 3242756527** — задокументирован случай периодического мерцания обоев на анимированном gifscene.pkg (~829 MiB, текстуры 4096×2048, VMA ~438 MB / RSS ~900 MB). Описаны диагностические признаки (render-target flicker, max-frame spikes, VMA/RSS divergence) и направления: texture/frame budget, GIF frame upload synchronization, render-target/present synchronization, fallback. Код не менялся — чистая документация для будущей работы по Phase 2. См. ROADMAP.md § Performance Regression Cases.
 
 ### Documentation
 
@@ -23,8 +27,8 @@
 
 | Suite | Tests | Result |
 |-------|-------|--------|
-| backend_scene_tests | ~150 | 100% passed |
-| scenescript_tests | ~40 | 100% passed |
-| backend_scene_thread_tests | ~5 | 100% passed |
+| backend_scene_tests | ~150 | ✅ 100% passed |
+| scenescript_tests | ~40 | ✅ 100% passed |
+| backend_scene_thread_tests | ~5 | ✅ 100% passed |
 
 All tests pass on GCC 16.2 / x86-64 / Kali Linux with Mesa llvmpipe. No pre-existing failures in the submodule test suite.
