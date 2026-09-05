@@ -2730,6 +2730,111 @@ private slots:
         QCOMPARE(m.value("bbb").toLongLong(), qint64 { 200 });
         QVERIFY(! m.contains("ccc"));
     }
+
+    // ── Per-wallpaper override precedence (Phase 2) ────────────────────────────
+    // These tests lock the read/write/merge/reset contract for per-wallpaper
+    // FPS and disable_mouse overrides. The runtime (main.qml) reads via
+    // readWallpaperConfig and applies get_opt_value(key, globalDefault).
+
+    void config_writeBoolPreservesType() {
+        // Bool values must survive a write-read round-trip as actual QVariant
+        // booleans — QML truthy checks depend on the exact type.
+        FileHelper    helper;
+        const QString id = "test_bool_type";
+
+        helper.writeWallpaperConfig(id, { { "disable_mouse", true }, { "fps", 15 } });
+        const QVariantMap got = helper.readWallpaperConfig(id);
+        QCOMPARE(got.value("disable_mouse").toBool(), true);
+        QCOMPARE(got.value("fps").toInt(), 15);
+
+        // Flip the boolean; ensure it does not degrade to an int or string
+        helper.writeWallpaperConfig(id, { { "disable_mouse", false } });
+        const QVariantMap got2 = helper.readWallpaperConfig(id);
+        QCOMPARE(got2.value("disable_mouse").toBool(), false);
+        QCOMPARE(got2.value("fps").toInt(), 15); // unchanged
+
+        helper.resetWallpaperConfig(id);
+    }
+
+    void config_writeIntFpsRangeValues() {
+        // FPS override boundaries: the slider caps at 5–60. Values at the
+        // edges must round-trip correctly.
+        FileHelper    helper;
+        const QString id = "test_fps_range";
+
+        for (int fps : { 5, 10, 15, 25, 30, 60 }) {
+            helper.resetWallpaperConfig(id);
+            helper.writeWallpaperConfig(id, { { "fps", fps } });
+            const QVariantMap got = helper.readWallpaperConfig(id);
+            QCOMPARE(got.value("fps").toInt(), fps);
+        }
+
+        helper.resetWallpaperConfig(id);
+    }
+
+    void config_writePartialMerge_resetsKeyOnNull() {
+        // Calling writeWallpaperConfig with an empty map for an existing
+        // config must preserve all existing keys (merge, not replace).
+        FileHelper    helper;
+        const QString id = "test_merge_empty";
+
+        helper.writeWallpaperConfig(id,
+                                    { { "fps", 25 }, { "disable_mouse", true } });
+        // "Write" nothing — existing keys survive
+        helper.writeWallpaperConfig(id, {});
+        const QVariantMap got = helper.readWallpaperConfig(id);
+        QCOMPARE(got.value("fps").toInt(), 25);
+        QCOMPARE(got.value("disable_mouse").toBool(), true);
+
+        helper.resetWallpaperConfig(id);
+    }
+
+    void config_writeNumericWorkshopIds() {
+        // Workshop IDs are numeric strings (e.g. "3242756527"). The config
+        // storage must not interpret these as numbers or lose leading
+        // zeros.
+        FileHelper helper;
+        const QString id = QStringLiteral("3242756527");
+
+        helper.writeWallpaperConfig(id, { { "fps", 30 } });
+        const QVariantMap got = helper.readWallpaperConfig(id);
+        QCOMPARE(got.value("fps").toInt(), 30);
+
+        // Second write with a different key
+        helper.writeWallpaperConfig(id, { { "disable_mouse", false } });
+        const QVariantMap got2 = helper.readWallpaperConfig(id);
+        QCOMPARE(got2.value("fps").toInt(), 30);
+        QCOMPARE(got2.value("disable_mouse").toBool(), false);
+
+        helper.resetWallpaperConfig(id);
+    }
+
+    void config_writeProjectNameIds() {
+        // Built-in project names (e.g. "deep_space") are alpha strings.
+        // They must not collide with workshop IDs or each other.
+        FileHelper    helper;
+        const QString id = QStringLiteral("deep_space");
+
+        helper.writeWallpaperConfig(id, { { "fps", 60 }, { "disable_mouse", true } });
+        const QVariantMap got = helper.readWallpaperConfig(id);
+        QCOMPARE(got.value("fps").toInt(), 60);
+        QCOMPARE(got.value("disable_mouse").toBool(), true);
+
+        // A different project must have its own independent config
+        const QString id2 = QStringLiteral("myproject");
+        helper.writeWallpaperConfig(id2, { { "fps", 15 } });
+        const QVariantMap got2 = helper.readWallpaperConfig(id2);
+        QCOMPARE(got2.value("fps").toInt(), 15);
+        QVERIFY(! got2.contains("disable_mouse")); // never set
+
+        // Original project is untouched
+        const QVariantMap got1 = helper.readWallpaperConfig(id);
+        QCOMPARE(got1.value("fps").toInt(), 60);
+        QCOMPARE(got1.value("disable_mouse").toBool(), true);
+
+        helper.resetWallpaperConfig(id);
+        helper.resetWallpaperConfig(id2);
+    }
 };
 
 QTEST_MAIN(TestFileHelper)

@@ -298,6 +298,8 @@ ColumnLayout {
         }
 
         SettingPage {
+            workshopId: root.cfg_WallpaperWorkShopId
+            pyext: root.pyext
             id: settingPage
         }
 
