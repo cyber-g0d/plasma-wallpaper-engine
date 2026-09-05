@@ -661,6 +661,20 @@ Flickable {
         }
     }
 
+    // Keep the debounce timer outside OptionGroup: its content property is
+    // a visual-item list and cannot contain the non-visual Timer object.
+    Timer {
+        id: perOptWriteTimer
+        interval: 300
+        repeat: false
+        onTriggered: {
+            if (!settingTab.workshopId || !settingTab.pyext) return;
+            settingTab.pyext.write_wallpaper_config(settingTab.workshopId, perWallpaperGroup.perOpt);
+            if (typeof cfg_PerOptChanged !== "undefined")
+                cfg_PerOptChanged = cfg_PerOptChanged + 1;
+        }
+    }
+
     // ── Per-Wallpaper Overrides ────────────────────────────────────────────────
     // Visible only when a wallpaper is selected (workshopId is set).
     // Reads/writes <id>.json in configDir/wallpaper/ through FileHelper.
@@ -676,21 +690,6 @@ Flickable {
 
         // Internal state — loaded from <workshopId>.json on workshopId change
         property var perOpt: ({})
-        // Debounce write timer: fires 300ms after the last spinbox/checkbox
-        // change to avoid writing on every keystroke/pixel-drag.
-        Timer {
-            id: perOptWriteTimer
-            interval: 300
-            repeat: false
-            onTriggered: {
-                if (!settingTab.workshopId || !settingTab.pyext) return;
-                settingTab.pyext.write_wallpaper_config(settingTab.workshopId, perWallpaperGroup.perOpt);
-                // Bump the runtime's PerOptChanged so the active wallpaper
-                // re-reads and applies the new overrides immediately.
-                if (typeof cfg_PerOptChanged !== "undefined")
-                    cfg_PerOptChanged = cfg_PerOptChanged + 1;
-            }
-        }
         function scheduleWrite() { perOptWriteTimer.restart(); }
 
         // Load per-wallpaper config when the selected wallpaper changes
