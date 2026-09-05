@@ -4,7 +4,7 @@
 
 ### Planned
 
-- **Razer Visualiser (3D): User Properties & Configuration** — сохранение и применение пользовательских свойств/конфигурации Wallpaper Engine из `project.json`, отображение в KDE-плагине, per-wallpaper persistence. Regression checklist: `doc/razer-visualiser-properties-checklist.md`.
+- **Razer Visualiser (3D): User Properties & Configuration** — save and apply Wallpaper Engine user properties/configuration from `project.json`, display in KDE plugin, per-wallpaper persistence. Regression checklist: `doc/razer-visualiser-properties-checklist.md`.
 
 ### Security / Safety
 
@@ -15,9 +15,9 @@
 
 ### Performance
 
-- **P-001 In-memory regression: Workshop 3242756527** — задокументирован случай периодического мерцания обоев на анимированном gifscene.pkg (~829 MiB, текстуры 4096×2048, VMA ~438 MB / RSS ~900 MB). Описаны диагностические признаки (render-target flicker, max-frame spikes, VMA/RSS divergence) и направления: texture/frame budget, GIF frame upload synchronization, render-target/present synchronization, fallback. Код не менялся — чистая документация для будущей работы по Phase 2. См. ROADMAP.md § Performance Regression Cases.
-- **P-002 In-memory regression: Workshop 3156591944 (Hackercore)** — задокументирован случай пикового потребления VRAM при загрузке тяжёлого scene.pkg (~250 MiB, ~1 GiB texture allocation cap). Описаны направления: texture/frame budget, graceful fallback на предыдущий кадр/обои, per-wallpaper FPS, диагностика VMA/RSS/frame pacing, учёт VRR/Adaptive Sync. Код не менялся — документационная задача для Phase 2. См. ROADMAP.md § Performance Regression Cases.
-- **P-003 Intermittent flicker on light scene: `deep_space` (Workshop TBD)** — задокументирован случай периодического мерцания обоев на лёгкой сцене, где memory pressure не является фактором (в отличие от P-001). Предполагаемые направления: swapchain/surface recreation audit, presentation scheduling (FIFO vs MAILBOX), compositor (KWin) interaction, minimal reproducer. Workshop ID требует подтверждения — отсутствует в локальном каталоге. Код не менялся — чистая документация. См. ROADMAP.md § Performance Regression Cases > P-003.
+- **P-001 In-memory regression: Workshop 3242756527** — documented case of intermittent wallpaper flicker on animated gifscene.pkg (~829 MiB, 4096×2048 textures, VMA ~438 MB / RSS ~900 MB). Diagnostic signs described (render-target flicker, max-frame spikes, VMA/RSS divergence) and directions: texture/frame budget, GIF frame upload synchronization, render-target/present synchronization, fallback. No code changes — pure documentation for future Phase 2 work. See ROADMAP.md § Performance Regression Cases.
+- **P-002 In-memory regression: Workshop 3156591944 (Hackercore)** — documented case of peak VRAM consumption during loading of heavy scene.pkg (~250 MiB, ~1 GiB texture allocation cap). Directions described: texture/frame budget, graceful fallback to previous frame/wallpaper, per-wallpaper FPS, VMA/RSS/frame pacing diagnostics, VRR/Adaptive Sync awareness. No code changes — documentation task for Phase 2. See ROADMAP.md § Performance Regression Cases.
+- **P-003 Intermittent flicker on light scene: `deep_space` (Workshop TBD)** — documented case of intermittent wallpaper flicker on a light scene where memory pressure is not a factor (unlike P-001). Suspected directions: swapchain/surface recreation audit, presentation scheduling (FIFO vs MAILBOX), compositor (KWin) interaction, minimal reproducer. Workshop ID needs confirmation — missing from local catalog. No code changes — pure documentation. See ROADMAP.md § Performance Regression Cases > P-003.
 
 ### Documentation
 

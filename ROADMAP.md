@@ -31,31 +31,29 @@
 | `SafeWallpaperBridge` (web QWebChannel) | ✅ Hardened: READ-only properties, no Q_INVOKABLE, grep-able surface |
 | `parseValveKV` (ACF parser) | ⚠️ Uses `std::function` recursion — deep nesting could stack-overflow. Mitigated by the 1 MiB input size cap (a real ACF with thousands of entries is < 200 KB; deeply nested attacks need more bytes than the cap allows) |
 | `TextureNode` (QSGSimpleTextureNode) | ✅ Hardened: null-texture guard prevents SIGSEGV in headless/offscreen GL (b79d5ae); degrades to transparent instead of crashing plasmashell |
-| `MpvBackend` (libmpv video) | ⚠️ In-process with plasmashell — libmpv crashes take down the desktop. Mitigation: upstream has render-thread unblocking on shutdown (6fc5cea) |
-| `QtWebEngine` (web wallpapers) | ⚠️ In-process with plasmashell — `--disable-web-security` flag is required for workshop compatibility. Mitigation: `WebUrlInterceptor` filters file:// requests |
+| `MpvBackend` (libmpv video) | �️ In-processs with plasmashell — libmpv crashes take down the desktop. Mitigation: upstream has render-thread unblocking on shutdown (6fc5cea) |
+| `QtWebEngine` (web wallpapers) | �️ In-procss with plasmashell — `--disable-web-security` flag is requied for workshop compatibility. Mitigation: `WebUrlIntrceptor` filters file:// requests |
 
-## Phase 1: Defensive Hardening (in progress)
+## Phase 1: Defnsive Hardening (in progress)
 
 **Goal:** Prevent wallpaper bugs from crashing plasmashell.
 
-- [x] **Null-texture guard in TextureNode** — guard QSGSimpleTextureNode::setTexture against null texture in headless/offscreen GL (commit b79d5ae, renderer fork `dev/null-texture-guard`)
-- [ ] **Razer Visualiser (3D): User Properties & Configuration** — сохранять и применять Wallpaper Engine user properties/configuration из `project.json`, отображать их в KDE-плагине, обеспечить per-wallpaper persistence. См. `doc/razer-visualiser-properties-checklist.md` для regression-тестирования.
+- [x] **Null-texture guard in TextureNode** — guard QSGSimpleTextureNode::setTexture against null texure in headless/offsreen GL (commit b79d5ae, renderer fork `dev/null-texture-guard`)
 - [ ] Catch-all error handling in wallpaper loading paths
-- [ ] Graceful fallback to static color/blank on wallpaper load failure
+- [ ] Gracefful fallback to static color/blank on wallpaper load failure
 - [ ] Signal-slot safety audit — verify no cascading failures
 - [ ] Thread-safety review — wallpaper enumeration runs off main thread?
 - [x] Steam library enumeration hardening — handle corrupt/missing workshop data (Phase 0)
-- [ ] Fuzz harness for wallpaper property parsing
+- [ ] Fuzz harness for wallpaper propery parsing
 
 ## Phase 2: Resource Limits (planned)
 
 **Goal:** Prevent wallpaper resource usage from degrading the desktop.
 
 - [ ] FPS limit for video wallpapers (configurable, default 30)
-- [ ] **Per-wallpaper FPS** — независимый лимит для scene-обоев, автоснижение при VRAM-давлении, ручная настройка через KDE-плагин; см. P-001, P-002
 - [ ] VRAM budget enforcement
-- [ ] **Heavy scene texture budget** — per-wallpaper лимит GPU-текстур (~256–512 MiB), downscale/streaming при превышении, предупреждение пользователю; см. P-002
-- [ ] **Graceful fallback chain** — fallback на предыдущий кадр/обои при OOM/allocation failure, сохранение последнего успешного кадра, авто-retry; см. P-002
+- [ ] **Heavy scene texture budget** — per-wallpaper GPU texture limit (~256–512 MiB), downscale/streaming on exceed, user warning; see P-002
+- [ ] **Graceful fallback chain** — fallback to previous frame/wallpaper on OOM/allocation failure, keep last successful frame, auto-retry; see P-002
 - [ ] CPU time budget for scene wallpapers
 - [ ] Idle detection — pause rendering when screen is locked / idle
 - [ ] Web wallpaper memory limits (Qt WebEngine process limits)
@@ -69,13 +67,22 @@
 - [ ] Crash recovery — restart renderer without plasmashell restart
 - [ ] Shared memory / DMA-BUF for zero-copy frame delivery
 
-## Phase 4: Observability (planned)
+## Phase 4: Observabillity (planned)
 
 **Goal:** Make wallpaper health visible and debuggable.
 
 - [ ] Per-wallpaper health metrics (FPS, VRAM, crash count, load time)
 - [ ] Diagnostic bundle — collect logs, backtraces, system info for bug reports
 - [ ] Plasma widget for wallpaper health overlay
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md). During Phase 1, contributions are welcome for:
+- Defensive hardening patches (null guards, error recovery, fallbacks)
+- Reproducible crash test cases
+- Architecture discussions for Phase 2-4
+
+Safety-critical patches land in `dev/plasmashell-safety`; renderer patches land in `dev/null-texture-guard` (renderer fork).
 
 ## Performance Regression Cases
 
@@ -85,50 +92,51 @@
 
 **Workshop ID:** 3242756527
 **Wallpaper type:** animated gifscene.pkg (~829 MiB)
-**Texture resolution:** 4096×2048 (per-frame)
+**Texture resolution:** 4096x2048 (per-frame)
 **Memory footprint:** VMA ~438 MB, RSS ~900 MB
 **Frame pacing:** mostly stable 30/24 FPS, occasional max-frame spikes
 
-#### Диагностические признаки
+#### Diagnostic Signs
 
-| Признак | Наблюдение | Что проверять |
+| Sign | Observation | What to Check |
 |---------|-----------|---------------|
-| Мерцание только обоев | Панели/виджеты Plasma не затрагиваются — проблема изолирована в render target обоев | Проверить, не сбрасывается ли `VkFramebuffer`/`VkRenderPass` между кадрами; не гоняется ли `vkQueueSubmit` за acquire-present циклом |
-| Привязка к анимированному gifscene.pkg | Статические сцены и видео не дают flicker | Сравнить pipeline загрузки GIF-кадров с обычным scene-рендерингом: формат, mip-уровни, тайлинг текстур |
-| Текстуры 4096×2048 | ~32 MB на кадр в RGBA8; несколько таких в пуле быстро насыщают VRAM | Проверить VMA-статистику: фрагментацию, количество аллокаций, хиты в `VMA_MEMORY_USAGE_GPU_ONLY` |
-| VMA ~438 MB при RSS ~900 MB | VMA учитывает только GPU-аллокации; разница ~460 MB — CPU-side копии, staging-буферы, Qt-структуры | Проверить, не дублируются ли GIF-кадры в CPU-памяти после upload на GPU |
-| Max-frame spikes при стабильном average | Периодические «длинные» кадры на фоне ровного 30/24 FPS | Искать блокирующие операции на render-потоке: синхронная загрузка с диска, ожидание fence, пересоздание swapchain |
+| Wallpaper-only flicker | Plasma panels/widgets unaffected — problem isolated to wallpaper render target | Check whether `VkFramebuffer`/`VkRenderPass` is reset between frames; whether `vkQueueSubmit` races with the acquire-present cycle |
+| Tied to animated gifscene.pkg | Static scenes and video wallpapers do not flicker | Compare GIF frame upload pipeline with normal scene rendering: format, mip levels, texture tiling |
+| 4096x2048 textures | ~32 MB per frame in RGBA8; several in pool quickly saturate VRAM | Check VMA stats: fragmentation, allocation count, hits in `VMA_MEMORY_USAGE_GPU_ONLY` |
+| VMA ~438 MB / RSS ~900 MB | VMA tracks GPU allocations only; ~460 MB gap is CPU-side copies, staging buffers, Qt structures | Check whether GIF frames are duplicated in CPU memory after GPU upload |
+| Max-frame spikes with stable average | Periodic long frames against steady 30/24 FPS baseline | Look for blocking ops on render thread: synchronous disk load, fence wait, swapchain recreation |
 
-#### Будущие направления
+#### Future Directions
 
 1. **Texture / frame budget (Phase 2):**
-   - Ввести лимит на суммарный размер GPU-текстур на сцену (~256–512 MB)
-   - При превышении — downscale текстур или throttling частоты загрузки GIF-кадров
-   - Добавить `VmaBudget`-based мониторинг с предупреждением до фактического исчерпания
+   - Introduce a total GPU texture size limit per scene (~256–512 MB)
+   - On exceed — downscale textures or throttle GIF frame upload rate
+   - Add `VmaBudget`-based monitoring with warning before actual exhaustion
 
 2. **GIF frame upload synchronization:**
-   - Проверить, не загружаются ли GIF-кадры синхронно в render-поток (блокирующий `glTexImage2D`/`vkCmdCopyBufferToImage` без стейджинга)
-   - Рассмотреть асинхронный upload через dedicated transfer queue + двойную буферизацию staging-буферов
-   - Профилировать `gifscene.pkg`-специфичный кодек: возможно, узкое место — декодирование, а не upload
+   - Check whether GIF frames are loaded synchronously on the render thread (blocking `glTexImage2D`/`vkCmdCopyBufferToImage` without staging)
+   - Consider async upload via dedicated transfer queue + double-buffered staging buffers
+   - Profile `gifscene.pkg`-specific codec: bottleneck may be decode, not upload
 
 3. **Render target / present synchronization:**
-   - Аудит `vkAcquireNextImageKHR` → render → `vkQueuePresentKHR` цепочки:
-     - Не вызывается ли `vkDeviceWaitIdle` между кадрами
-     - Правильно ли расставлены `VkSemaphore`/`VkFence` (нет ли double-wait или missing signal)
-   - Проверить режим презентации (`VK_PRESENT_MODE_FIFO` vs `MAILBOX` vs `IMMEDIATE`): flicker на FIFO может указывать на пропуск vblank из-за late submit
-   - Исключить неявный `vkQueueWaitIdle` в hot path (например, внутри VMA-дефрагментации)
+   - Audit `vkAcquireNextImageKHR` -> render -> `vkQueuePresentKHR` chain:
+     - Is `vkDeviceWaitIdle` called between frames?
+     - Are `VkSemaphore`/`VkFence` correctly placed (no double-wait or missing signal)?
+   - Check presentation mode (`VK_PRESENT_MODE_FIFO` vs `MAILBOX` vs `IMMEDIATE`): FIFO flicker may indicate vblank miss from late submit
+   - Rule out implicit `vkQueueWaitIdle` in hot path (e.g. inside VMA defragmentation)
 
 4. **Fallback:**
-   - При детекции flicker > N кадров подряд — переход на статический кадр с градиентной заливкой
-   - При исчерпании VRAM — graceful degradation: пропуск кадров, fallback-текстура низкого разрешения
-   - Логирование статистики кадров в диагностический бандл (Phase 4)
+   - On flicker detected > N consecutive frames — switch to static frame with gradient fill
+   - On VRAM exhaustion — graceful degradation: frame skip, low-res fallback texture
+   - Log frame statistics to diagnostic bundle (Phase 4)
 
 #### Regression test plan
 
-- [ ] Воспроизвести на том же Workshop ID с включённым `VK_LAYER_LUNARG_monitor`
-- [ ] Захватить GPU trace (RenderDoc / `VK_LAYER_LUNARG_api_dump`) на flicker-кадре
-- [ ] Сравнить GPU-тайминги между flicker-кадром и соседними стабильными
-- [ ] Профилировать распределение VMA: `VmaBudget`, `VmaDetailedStatistics`
+- [ ] Reproduce on same Workshop ID with `VK_LAYER_LUNARG_monitor` enabled
+- [ ] Capture GPU trace (RenderDoc / `VK_LAYER_LUNARG_api_dump`) on flicker frame
+- [ ] Compare GPU timings between flicker frame and neighboring stable frames
+- [ ] Profile VMA distribution: `VmaBudget`, `VmaDetailedStatistics`
+
 ### P-002: Heavy Scene wallpaper texture exhaustion (Workshop 3156591944 — Hackercore)
 
 **Status:** Open — diagnostic phase, no code changes
@@ -138,180 +146,180 @@
 **Memory footprint:** VMA allocation cap ~1 GiB during loading, RSS significantly above VMA
 **Frame pacing:** TBD — initial loading stresses allocator before first stable frame
 
-#### Диагностические признаки
+#### Diagnostic Signs
 
-| Признак | Наблюдение | Что проверять |
+| Sign | Observation | What to Check |
 |---------|-----------|---------------|
-| scene.pkg ~250 MiB | На порядок тяжелее типичных сцен; содержит большое количество предзагруженных текстур, шейдеров, мешей | Профилировать загрузку: какие ассеты занимают больше всего места в архиве? Есть ли неиспользуемые ассеты? |
-| Texture allocation cap ~1 GiB | VMA-аллокатор достигает ~1 GiB при загрузке — близко к границе доступной VRAM на многих GPU | Мониторинг `VmaBudget` и `VmaDetailedStatistics` в процессе загрузки; определить пиковое потребление и момент стабилизации |
-| Загрузка до первого кадра | Потенциально долгий startup из-за массовой загрузки ассетов | Измерить wall-clock time от `init()` до первого `render()`; сравнить с лёгкими сценами |
-| RSS существенно выше VMA | Разница между RSS и VMA указывает на CPU-side дублирование или staging-буферы | Проверить, освобождаются ли staging-буферы после GPU-upload; нет ли утечек в цикле загрузки |
+| scene.pkg ~250 MiB | An order of magnitude heavier than typical scenes; contains many preloaded textures, shaders, meshes | Profile loading: which assets take the most space in the archive? Are there unused assets? |
+| Texture allocation cap ~1 GiB | VMA allocator reaches ~1 GiB during load — near available VRAM boundary on many GPUs | Monitor `VmaBudget` and `VmaDetailedStatistics` during loading; determine peak consumption and stabilization point |
+| Loading before first frame | Potentially long startup due to bulk asset loading | Measure wall-clock time from `init()` to first `render()`; compare with light scenes |
+| RSS significantly above VMA | RSS-VMA gap indicates CPU-side duplication or staging buffers | Check whether staging buffers are freed after GPU upload; verify no leaks in load loop |
 
-#### Задачи
+#### Tasks
 
 1. **Texture / frame budget (Phase 2):**
-   - Ввести per-wallpaper лимит на суммарный размер GPU-текстур (~256–512 MiB по умолчанию, с возможностью повышения для тяжёлых сцен)
-   - При превышении в процессе загрузки — graceful degradation: downscale текстур, отложенная загрузка (streaming), или fallback-текстура низкого разрешения
-   - Предупреждение пользователю через KDE-плагин, если сцена требует больше VRAM, чем доступно
-   - Добавить `VmaBudget`-based мониторинг с предупреждением до фактического исчерпания
+   - Introduce per-wallpaper GPU texture size limit (~256–512 MiB default, raisable for heavy scenes)
+   - On exceed during load — graceful degradation: texture downscale, deferred loading (streaming), or low-res fallback texture
+   - User warning via KDE plugin if scene requires more VRAM than available
+   - Add `VmaBudget`-based monitoring with warning before actual exhaustion
 
-2. **Graceful fallback на предыдущий кадр/обои:**
-   - Если wallpaper не может быть загружен (OOM, timeout, allocation failure) — fallback на предыдущие рабочие обои
-   - Сохранять последний успешный кадр как статический fallback
-   - Информировать пользователя через плагин о причине fallback'а
-   - Автоматический retry через настраиваемый интервал
+2. **Graceful fallback to previous frame/wallpaper:**
+   - If wallpaper cannot be loaded (OOM, timeout, allocation failure) — fallback to previous working wallpaper
+   - Keep last successful frame as static fallback
+   - Inform user via plugin about fallback reason
+   - Auto-retry at configurable interval
 
 3. **Per-wallpaper FPS:**
-   - Независимый FPS-лимит для scene-обоев (отдельно от video)
-   - Значение по умолчанию для тяжёлых сцен — 24–30 FPS
-   - Возможность ручной настройки per-wallpaper через KDE-плагин
-   - Автоматическое снижение FPS при приближении к VRAM-лимиту
+   - Independent FPS limit for scene wallpapers (separate from video)
+   - Default for heavy scenes — 24–30 FPS
+   - Manual per-wallpaper tuning via KDE plugin
+   - Auto-reduction as VRAM limit approaches
 
-4. **Диагностика VMA/RSS/frame pacing:**
-   - Per-wallpaper сбор статистики: VMA allocation count/size, RSS (process-wide), frame times (min/max/avg/P99), frame drops
-   - Экспорт в диагностический бандл (Phase 4)
-   - In-plugin индикатор здоровья: зелёный/жёлтый/красный по memory pressure и frame pacing
-   - Логирование аллокаций с тегами для отслеживания утечек
+4. **VMA/RSS/frame pacing diagnostics:**
+   - Per-wallpaper stats collection: VMA allocation count/size, RSS (process-wide), frame times (min/max/avg/P99), frame drops
+   - Export to diagnostic bundle (Phase 4)
+   - In-plugin health indicator: green/yellow/red by memory pressure and frame pacing
+   - Tagged allocation logging for leak tracking
 
 5. **VRR / Adaptive Sync:**
-   - Учёт VRR (Variable Refresh Rate) и Adaptive Sync при выставлении FPS-лимита
-   - Автоопределение VRR-диапазона дисплея (напр. 48–144 Hz) через DRM/KMS или `VK_EXT_display_control`
-   - При активном VRR — таргетировать FPS в нижней половине VRR-диапазона для минимизации LFC (Low Framerate Compensation)
-   - Fallback: если VRR недоступен — использовать классический `VK_PRESENT_MODE_FIFO` с vblank-синхронизацией
-   - Документирование лучших практик FPS для VRR-дисплеев
+   - Account for VRR (Variable Refresh Rate) and Adaptive Sync when setting FPS limit
+   - Auto-detect display VRR range (e.g. 48–144 Hz) via DRM/KMS or `VK_EXT_display_control`
+   - With active VRR — target FPS in lower half of VRR range to minimize LFC (Low Framerate Compensation)
+   - Fallback: if VRR unavailable — use classic `VK_PRESENT_MODE_FIFO` with vblank sync
+   - Document FPS best practices for VRR displays
 
 #### Regression test plan
 
-- [ ] Загрузить Workshop 3156591944 на GPU с 2/4/8 GiB VRAM и замерить `VmaBudget` до/после загрузки
-- [ ] Захватить GPU trace (RenderDoc) на момент пиковой аллокации — определить топ-10 крупнейших текстур
-- [ ] Профилировать startup latency: `init()` → первый кадр → стабильный FPS
-- [ ] Проверить поведение при принудительном ограничении VRAM через `VK_EXT_memory_budget` mock
-- [ ] Стресс-тест: циклическая смена wallpaper на 3156591944 и обратно — проверить отсутствие утечек (VMA + RSS)
+- [ ] Load Workshop 3156591944 on GPU with 2/4/8 GiB VRAM and measure `VmaBudget` before/after load
+- [ ] Capture GPU trace (RenderDoc) at peak allocation — identify top-10 largest textures
+- [ ] Profile startup latency: `init()` -> first frame -> stable FPS
+- [ ] Verify behavior under forced VRAM limit via `VK_EXT_memory_budget` mock
+- [ ] Stress-test: cycle wallpaper to 3156591944 and back — verify no leaks (VMA + RSS)
 
 ### P-003: Intermittent wallpaper-only flicker on light scene — `deep_space` (Workshop TBD)
 
 **Status:** Open — needs Workshop ID confirmation
 
-**Workshop ID:** TBD — отсутствует в локальном каталоге Steam Workshop. Требуется подтверждение от пользователя.
+**Workshop ID:** TBD — missing from local Steam Workshop catalog. Needs user confirmation.
 **Wallpaper nickname:** `deep_space`
-**Wallpaper type:** TBD (предположительно scene или video, лёгкая сцена)
-**Texture resolution:** TBD — заведомо ниже 4096×2048 (лёгкая сцена)
-**Memory footprint:** TBD — ожидается значительно ниже VMA ~438 MiB / RSS ~900 MiB эталона P-001
-**Frame pacing:** TBD — intermittent flicker при стабильном в среднем FPS
+**Wallpaper type:** TBD (likely scene or video, light scene)
+**Texture resolution:** TBD — known to be below 4096x2048 (light scene)
+**Memory footprint:** TBD — expected significantly below the P-001 baseline of VMA ~438 MiB / RSS ~900 MiB
+**Frame pacing:** TBD — intermittent flicker with stable average FPS
 
-#### Отличие от P-001
+#### Difference from P-001
 
-P-001 привязан к тяжёлому gifscene.pkg (Workshop 3242756527) с текстурами 4096×2048 и VMA ~438 MiB. Фликер там объясним через VMA-фрагментацию, staging-дублирование и гонку acquire-present.
+P-001 is tied to a heavy gifscene.pkg (Workshop 3242756527) with 4096x2048 textures and VMA ~438 MiB. Flicker there is explainable via VMA fragmentation, staging duplication, and acquire-present race.
 
-P-003 — flicker на **лёгкой сцене**, где memory pressure не должен быть фактором. Это указывает на другую природу flicker'а, не связанную с исчерпанием ресурсов:
-- Возможен race condition в swapchain-recreation, не привязанный к объёму VRAM
-- Возможен баг в логике presentation scheduling, не зависящий от сложности сцены
-- Возможна проблема с compositor-взаимодействием (KWin) — например, неверный damage-region или partial-update, вызывающий пропуск кадра на стороне композитора
+P-003 — flicker on a **light scene** where memory pressure should not be a factor. This points to a different root cause, unrelated to resource exhaustion:
+- Possible swapchain-recreation race condition, independent of VRAM volume
+- Possible bug in presentation scheduling logic, independent of scene complexity
+- Possible compositor interaction issue (KWin) — e.g. incorrect damage-region or partial-update causing frame drop on the compositor side
 
-#### Диагностические признаки (предварительные)
+#### Diagnostic Signs (preliminary)
 
-| Признак | Ожидание для лёгкой сцены | Что проверять |
+| Sign | Expectation for Light Scene | What to Check |
 |---------|--------------------------|---------------|
-| Flicker только обоев, панели стабильны | Как в P-001 — изоляция в render target | Проверить, общий ли это баг presentation pipeline, не зависящий от нагрузки |
-| Лёгкая сцена (предположительно) | VMA < 100 MiB, RSS < 200 MiB | Исключить memory pressure как причину; если flicker воспроизводится — значит корневая причина не в VMA |
-| Intermittent, нерегулярный | Не привязан к конкретным кадрам или фазам загрузки | Искать недерминированные факторы: системные события, композитор-режимы, vblank-тайминг |
-| Стабильный средний FPS | Нет max-frame spikes, в отличие от P-001 | Искать проблему в present-path, а не render-path: `vkQueuePresentKHR`, surface capabilities, режим FIFO/MAILBOX |
+| Wallpaper-only flicker, panels stable | Same as P-001 — isolated to render target | Check whether this is a general presentation pipeline bug, not load-dependent |
+| Light scene (presumed) | VMA < 100 MiB, RSS < 200 MiB | Rule out memory pressure as cause; if flicker reproduces — root cause is not VMA |
+| Intermittent, irregular | Not tied to specific frames or load phases | Look for non-deterministic factors: system events, compositor modes, vblank timing |
+| Stable average FPS | No max-frame spikes, unlike P-001 | Investigate present-path, not render-path: `vkQueuePresentKHR`, surface capabilities, FIFO/MAILBOX mode |
 
-#### Будущие направления
+#### Future Directions
 
 1. **Swapchain / surface recreation audit:**
-   - Проверить, не пересоздаётся ли swapchain чаще необходимого (напр. на каждый `resizeEvent`, даже без изменения размера)
-   - Верифицировать `VkSurfaceCapabilitiesKHR::currentExtent` — не возвращает ли композитор (0,0) или stale-значения
-   - Проверить обработку `VK_ERROR_OUT_OF_DATE_KHR` и `VK_SUBOPTIMAL_KHR` — нет ли ложных срабатываний
+   - Check whether swapchain is recreated more often than necessary (e.g. on every `resizeEvent`, even without size change)
+   - Verify `VkSurfaceCapabilitiesKHR::currentExtent` — does the compositor return (0,0) or stale values?
+   - Check handling of `VK_ERROR_OUT_OF_DATE_KHR` and `VK_SUBOPTIMAL_KHR` — are there false positives?
 
 2. **Presentation scheduling:**
-   - Сравнить `VK_PRESENT_MODE_FIFO` vs `MAILBOX` на проблемной сцене — исчезает ли flicker при смене режима
-   - Проверить, не вызывает ли KWin partial-update damage tracking некорректную отрисовку области обоев
-   - Исключить vblank-miss из-за scheduling jitter: замерить `present_id` / `present_time` через `VK_EXT_present_timing`
+   - Compare `VK_PRESENT_MODE_FIFO` vs `MAILBOX` on the problematic scene — does flicker disappear with mode change?
+   - Check whether KWin partial-update damage tracking causes incorrect wallpaper region rendering
+   - Rule out vblank-miss from scheduling jitter: measure `present_id` / `present_time` via `VK_EXT_present_timing`
 
 3. **Compositor (KWin) interaction:**
-   - Проверить damage-region: не отправляет ли плагин пустой/нулевой damage, заставляя KWin перерисовывать всю область
-   - Верифицировать `wl_surface::damage_buffer` и `zwp_linux_buffer_params_v1` — корректность buffer-release цикла
-   - Исключить гонку между buffer-release KWin и acquire-next-image плагина
+   - Check damage-region: does the plugin send empty/null damage, forcing KWin to repaint the entire area?
+   - Verify `wl_surface::damage_buffer` and `zwp_linux_buffer_params_v1` — correctness of buffer-release cycle
+   - Rule out race between KWin buffer-release and plugin acquire-next-image
 
 4. **Minimal reproducer:**
-   - Создать минимальную сцену (один треугольник, статическая текстура), которая даёт flicker
-   - Если не даёт — значит проблема в чём-то специфичном для ассетов `deep_space`
-   - Бисекция ассетов `deep_space`: отключать слои/эффекты по одному, пока flicker не исчезнет
+   - Create a minimal scene (single triangle, static texture) that produces flicker
+   - If it doesn't — the problem is specific to `deep_space` assets
+   - Bisect `deep_space` assets: disable layers/effects one by one until flicker disappears
 
 #### Regression test plan
 
-- [ ] Подтвердить Workshop ID `deep_space` и подписаться в Steam
-- [ ] Воспроизвести flicker на лёгкой сцене с включённым `VK_LAYER_LUNARG_monitor`
-- [ ] Сравнить swapchain-метрики (create/destroy count, present-timing) между flicker-сессией и стабильной
-- [ ] Протестировать оба presentation mode (FIFO / MAILBOX) — записать, исчезает ли flicker
-- [ ] Захватить KWin debug log (`KWIN_LOG=debug`) в момент flicker'а — проверить damage-region и buffer-release
-- [ ] Создать minimal reproducer сцену для изоляции корневой причины
+- [ ] Confirm Workshop ID for `deep_space` and subscribe on Steam
+- [ ] Reproduce flicker on light scene with `VK_LAYER_LUNARG_monitor` enabled
+- [ ] Compare swapchain metrics (create/destroy count, present-timing) between flicker session and stable
+- [ ] Test both presentation modes (FIFO / MAILBOX) — record whether flicker disappears
+- [ ] Capture KWin debug log (`KWIN_LOG=debug`) at flicker moment — check damage-region and buffer-release
+- [ ] Create minimal reproducer scene to isolate root cause
 
 ## Feature Requirements: Per-Wallpaper Configuration & Future Flags
 
 ### FR-001: Per-Wallpaper FPS Limit
 
-**Приоритет:** Phase 2 (Resource Limits)
+**Priority:** Phase 2 (Resource Limits)
 
-- Независимый FPS-лимит для каждого типа обоев: scene, video, web
-- Значения по умолчанию:
-  - Scene: 30 FPS (тяжёлые) / 60 FPS (лёгкие, автоопределение)
-  - Video: 30 FPS (совпадает с типичным фреймрейтом видео)
-  - Web: 15 FPS (щадящий режим для QtWebEngine)
-- Возможность ручной настройки per-wallpaper через KDE-плагин
-- Автоматическое снижение FPS при приближении к VRAM-лимиту (throttling)
-- Учёт VRR/Adaptive Sync: автоопределение VRR-диапазона, таргетинг в нижней половине диапазона для экономии энергии
+- Independent FPS limit for each wallpaper type: scene, video, web
+- Default values:
+  - Scene: 30 FPS (heavy) / 60 FPS (light, auto-detected)
+  - Video: 30 FPS (matches typical video framerate)
+  - Web: 15 FPS (conservative mode for QtWebEngine)
+- Manual per-wallpaper tuning via KDE plugin
+- Automatic FPS reduction as VRAM limit approaches (throttling)
+- VRR/Adaptive Sync aware: auto-detect VRR range, target lower half of range for energy savings
 
 ### FR-002: disableMouse Flag
 
-**Приоритет:** Phase 2 (Resource Limits)
+**Priority:** Phase 2 (Resource Limits)
 
-- Per-wallpaper флаг, отключающий обработку событий мыши для обоев (движение, клики, drag)
-- Мотивация:
-  - Снижение CPU-нагрузки от ненужной обработки событий (особенно для scene-обоев с particle-эффектами, реагирующими на мышь)
-  - Устранение потенциального источника jitter/flicker: обработка mouse-event в render-потоке может вызывать микро-задержки
-  - Экономия энергии на ноутбуках (пробуждение CPU на каждое движение мыши)
-- По умолчанию: `false` (мышь включена) для обратной совместимости
-- GUI: чекбокс в KDE-плагине, per-wallpaper
+- Per-wallpaper flag that disables mouse event processing for wallpapers (move, click, drag)
+- Motivation:
+  - Reduce CPU load from unnecessary event processing (especially for scene wallpapers with mouse-reactive particle effects)
+  - Eliminate potential jitter/flicker source: mouse-event processing on render thread can cause micro-delays
+  - Power saving on laptops (CPU wakeup on every mouse movement)
+- Default: `false` (mouse enabled) for backward compatibility
+- GUI: checkbox in KDE plugin, per-wallpaper
 
 ### FR-003: Future Audio-Reactive Flags
 
-**Приоритет:** Phase 3+ (Process Isolation)
+**Priority:** Phase 3+ (Process Isolation)
 
-- Per-wallpaper флаги для аудио-реактивных обоев (визуализация спектра, waveform, audio-driven particles)
-- Планируемые флаги:
-  - `audioReactive` (bool) — включает/отключает audio pipeline для обоев
-  - `audioSource` (enum: `system`, `microphone`, `application`) — источник аудио
-  - `audioSensitivity` (float 0.0–2.0) — множитель чувствительности
-  - `audioSmoothing` (float 0.0–1.0) — сглаживание амплитуд (экспоненциальное скользящее среднее)
-  - `audioBands` (int 8–256) — количество частотных полос для FFT
-- Требования:
-  - Аудио-захват должен работать в изолированном процессе (Phase 3), чтобы не блокировать plasmashell
-  - Низкая latency (< 16 ms) через PulseAudio/PipeWire real-time scheduling
-  - Автоматическое отключение audio pipeline при `disableMouse` + отсутствии других потребителей — экономия CPU
+- Per-wallpaper flags for audio-reactive wallpapers (spectrum visualization, waveform, audio-driven particles)
+- Planned flags:
+  - `audioReactive` (bool) — enable/disable audio pipeline for wallpaper
+  - `audioSource` (enum: `system`, `microphone`, `application`) — audio source
+  - `audioSensitivity` (float 0.0–2.0) — sensitivity multiplier
+  - `audioSmoothing` (float 0.0–1.0) — amplitude smoothing (exponential moving average)
+  - `audioBands` (int 8–256) — number of frequency bands for FFT
+- Requirements:
+  - Audio capture must run in an isolated process (Phase 3) to avoid blocking plasmashell
+  - Low latency (< 16 ms) via PulseAudio/PipeWire real-time scheduling
+  - Auto-disable audio pipeline when `disableMouse` + no other consumers — CPU savings
 
 ### FR-004: Future Parallax Flags
 
-**Приоритет:** Phase 3+ (Process Isolation)
+**Priority:** Phase 3+ (Process Isolation)
 
-- Per-wallpaper флаги для параллакс-эффекта (смещение слоёв относительно движения мыши / акселерометра)
-- Планируемые флаги:
-  - `parallaxEnabled` (bool) — включает параллакс
-  - `parallaxStrength` (float 0.0–2.0) — сила эффекта
-  - `parallaxMode` (enum: `mouse`, `accelerometer`, `both`) — источник движения
-  - `parallaxLayers` (int 2–10) — количество слоёв для depth-based смещения
-- Требования:
-  - Параллакс должен учитывать `disableMouse`: если мышь отключена, parallax через `mouse` недоступен
-  - Аппаратное ускорение через GPU (vertex-shader displacement), без CPU-side обработки
-  - Совместимость с VRR: плавное смещение без разрывов на любом FPS
+- Per-wallpaper flags for parallax effect (layer displacement relative to mouse / accelerometer movement)
+- Planned flags:
+  - `parallaxEnabled` (bool) — enable parallax
+  - `parallaxStrength` (float 0.0–2.0) — effect strength
+  - `parallaxMode` (enum: `mouse`, `accelerometer`, `both`) — motion source
+  - `parallaxLayers` (int 2–10) — number of layers for depth-based displacement
+- Requirements:
+  - Parallax must respect `disableMouse`: if mouse is disabled, parallax via `mouse` is unavailable
+  - Hardware-accelerated via GPU (vertex-shader displacement), no CPU-side processing
+  - VRR compatible: smooth displacement without tearing at any FPS
 
 ### FR-005: Per-Wallpaper Persistence & GUI
 
-**Приоритет:** Phase 1 (Defensive Hardening) — базовая версия; Phase 4 — расширенная
+**Priority:** Phase 1 (Defensive Hardening) — basic version; Phase 4 — extended
 
-- Сохранение per-wallpaper настроек (FPS, disableMouse, audio, parallax) в локальном конфиге (JSON/QSettings)
-- Структура конфига:
+- Save per-wallpaper settings (FPS, disableMouse, audio, parallax) in local config (JSON/QSettings)
+- Config structure:
   ```json
   {
     "workshopId": "TBD",
@@ -321,18 +329,16 @@ P-003 — flicker на **лёгкой сцене**, где memory pressure не 
     "parallaxEnabled": false
   }
   ```
-- Путь: `~/.config/wallpaper-engine-kde/workshop/<workshopId>.json`
-- Миграция: при обновлении плагина — автоматический перенос старых настроек в новую схему
-- GUI (KDE-плагин):
-  - Вкладка «Wallpaper Settings» в окне настройки обоев
-  - Элементы: FPS slider (1–120), disableMouse checkbox
-  - Расширенные настройки (audio, parallax) — в collapsible-секции «Advanced»
-  - Индикатор здоровья обоев (Phase 4): FPS, VRAM, crash count — overlay в preview
-  - Кнопка «Reset to Defaults» для сброса per-wallpaper настроек
-- Persistence между сессиями plasmashell: настройки загружаются при старте wallpaper, сохраняются при изменении
-- Валидация: при загрузке конфига — проверка границ значений, fallback на defaults при повреждённом JSON
-
-
+- Path: `~/.config/wallpaper-engine-kde/workshop/<workshopId>.json`
+- Migration: on plugin upgrade — automatic migration of old settings to new schema
+- GUI (KDE plugin):
+  - "Wallpaper Settings" tab in wallpaper configuration dialog
+  - Controls: FPS slider (1–120), disableMouse checkbox
+  - Advanced settings (audio, parallax) — in collapsible "Advanced" section
+  - Wallpaper health indicator (Phase 4): FPS, VRAM, crash count — overlay in preview
+  - "Reset to Defaults" button for per-wallpaper settings reset
+- Persistence across plasmashell sessions: settings loaded at wallpaper start, saved on change
+- Validation: on config load — bounds checking, fallback to defaults on corrupt JSON
 
 ---
 
@@ -341,7 +347,7 @@ P-003 — flicker на **лёгкой сцене**, где memory pressure не 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). During Phase 1, contributions are welcome for:
 - Defensive hardening patches (null guards, error recovery, fallbacks)
 - Reproducible crash test cases
-- Architecture discussions for Phase2–4
+- Architecture discussions for Phase 2–4
 
 Safety-critical patches land in `dev/plasmashell-safety`; renderer patches land in `dev/null-texture-guard` (renderer fork).
 
