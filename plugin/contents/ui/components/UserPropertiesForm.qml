@@ -288,7 +288,11 @@ Item {
                         Label { text: i18nc("@info color picker hex entry", "Enter color as hex (e.g. #ff0000):") }
                         TextField { id: hexInput; placeholderText: "#ff0000" }
                         Label { text: i18nc("@info color picker preview", "Red/Green/Blue (0-255):") }
-                        RowLayout { SpinBox { id: rSpin; from: 0; to: 255; value: 255 }; SpinBox { id: gSpin; from: 0; to: 255 }; SpinBox { id: bSpin; from: 0; to: 255 } }
+                        RowLayout {
+                            SpinBox { id: rSpin; from: 0; to: 255; value: 255 }
+                            SpinBox { id: gSpin; from: 0; to: 255 }
+                            SpinBox { id: bSpin; from: 0; to: 255 }
+                        }
                     }
                     standardButtons: Dialog.Ok | Dialog.Cancel
                     onAccepted: {
