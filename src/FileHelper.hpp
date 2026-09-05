@@ -48,6 +48,12 @@ public:
     // (~10 KB typical, a few MB for fat puppet definitions) while defeating
     // GB-scale DoS reads of /dev/zero or a sparse file.
     static constexpr qint64 kMaxReadSize = 64LL * 1024 * 1024;
+
+    // Maximum ACF (Steam Workshop manifest) file size readWorkshopManifest
+    // will parse.  A typical manifest with thousands of subscriptions is
+    // < 200 KB; 1 MiB is a generous ceiling that stops adversarial input
+    // (symlink to /dev/zero, crafted sparse file) from being read whole.
+    static constexpr qint64 kMaxAcfSize = 1LL * 1024 * 1024;
     // Synchronous, recursive directory byte total. `depth` semantics:
     //   depth <= 0  => UNLIMITED recursion (historical sentinel — note this is the
     //                  OPPOSITE of "current dir only"; kept for the public contract);

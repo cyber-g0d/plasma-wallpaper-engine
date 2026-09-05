@@ -2593,6 +2593,45 @@ private slots:
         QCOMPARE(m.size(), 1);
         QCOMPARE(m.value("42").toLongLong(), qint64 { 100 });
     }
+    void readWorkshopManifest_rejectsDotDotTraversal() {
+        // Path traversal via ..: even if the lexical form looks like a
+        // valid library, canonical resolution must defeat the escape.
+        QTemporaryDir realLib;
+        QVERIFY(realLib.isValid());
+        const QString realAcf = realLib.path() + "/steamapps/workshop/appworkshop_431960.acf";
+        QDir().mkpath(QFileInfo(realAcf).absolutePath());
+        QFile f(realAcf);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(R"("AppWorkshop" { "WorkshopItemsInstalled" { "1" { "timeupdated" "100" } } })");
+        f.close();
+        const QString traversal =
+            realLib.path() + "/../" + QFileInfo(realLib.path()).fileName();
+        FileHelper fh;
+        const auto m = fh.readWorkshopManifest(traversal);
+        QCOMPARE(m.size(), 1);
+        const auto m2 = fh.readWorkshopManifest(realLib.path() + "/nonexistent/../../../etc");
+        QVERIFY(m2.isEmpty());
+    }
+
+    void readWorkshopManifest_rejectsOverSizeAcf() {
+        QTemporaryDir lib;
+        QVERIFY(lib.isValid());
+        const QString acfPath = lib.path() + "/steamapps/workshop/appworkshop_431960.acf";
+        QDir().mkpath(QFileInfo(acfPath).absolutePath());
+        QFile f(acfPath);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.resize(FileHelper::kMaxAcfSize + 1));
+        f.close();
+        FileHelper fh;
+        const auto m = fh.readWorkshopManifest(lib.path());
+        QVERIFY(m.isEmpty());
+    }
+
+    void readWorkshopManifest_emptyCanonicalReturnsEmpty() {
+        FileHelper fh;
+        const auto m = fh.readWorkshopManifest("/nonexistent/path/xyz");
+        QVERIFY(m.isEmpty());
+    }
 
     // ── recordSeenVersion / seenVersion ──────────────────────────────────────
     void recordSeenVersion_writesBackToIdJson() {

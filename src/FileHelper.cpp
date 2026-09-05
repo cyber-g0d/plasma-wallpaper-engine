@@ -1089,9 +1089,28 @@ QVariantMap FileHelper::readWorkshopManifest(const QString& steamLibraryPath) {
     if (steamLibraryPath.isEmpty()) return empty;
     QString lib = steamLibraryPath;
     if (lib.startsWith("file://")) lib = lib.mid(7);
-    const QString acfPath = lib + "/steamapps/workshop/appworkshop_431960.acf";
+    // Canonicalise to defeat .. traversal: a path like
+    // /home/user/.steam/../../../etc/passwd will resolve to /etc/passwd
+    // and the constructed acfPath will point nowhere useful. We bail on
+    // empty canonical (non-existent path, unplugged drive, etc.) rather
+    // than let the caller treat the undefended lexical form as a library
+    // root and walk its contents.
+    const QString canonLib = QFileInfo(lib).canonicalFilePath();
+    if (canonLib.isEmpty()) return empty;
+    const QString acfPath = canonLib + "/steamapps/workshop/appworkshop_431960.acf";
     QFile         f(acfPath);
     if (! f.exists() || ! f.open(QIODevice::ReadOnly | QIODevice::Text)) return empty;
+    // Adversarial ACF files: a workshop manifest is at most a few hundred
+    // KB even for libraries with thousands of subscriptions. A 1 MiB cap
+    // stops a DoS read of /dev/zero or a crafted sparse file while leaving
+    // generous headroom. Mirrors the spirit of kMaxReadSize.
+    const qint64 sz = f.size();
+    if (sz > kMaxAcfSize) {
+        qWarning() << "FileHelper::readWorkshopManifest refused over-size ACF:" << acfPath
+                   << "(" << sz << "bytes >" << kMaxAcfSize << ")";
+        f.close();
+        return empty;
+    }
     const QString text = QString::fromUtf8(f.readAll());
     f.close();
     const auto parsed = parseValveKV(text);
