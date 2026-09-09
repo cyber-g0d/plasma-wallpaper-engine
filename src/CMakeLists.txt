@@ -120,3 +120,42 @@ install(FILES
     DESTINATION ${KDE_INSTALL_QMLDIR}/${QMLPLUGIN_INSTALL_URI}
 )
 
+
+# ── Fuzzing targets (Phase 0 safety add‑ons) ─────────────────────────────────
+# libFuzzer harnesses for the Valve KV format parser and project.json property
+# extraction logic.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CROSSCOMPILING)
+    # Valve KV parser fuzzer
+    add_executable(fuzz_valvekv
+        FuzzValveKv.cpp
+        ${WEKDE_SRC_DIR}/FileHelper.cpp
+    )
+    target_include_directories(fuzz_valvekv PRIVATE
+        ${WEKDE_SRC_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(fuzz_valvekv PRIVATE
+        Qt6::Core
+    )
+    target_compile_options(fuzz_valvekv PRIVATE -fsanitize=fuzzer)
+    target_link_options(fuzz_valvekv PRIVATE -fsanitize=fuzzer)
+
+    # Project JSON property extraction fuzzer
+    add_executable(fuzz_projectjson
+        FuzzProjectJson.cpp
+        ${WEKDE_SRC_DIR}/FileHelper.cpp
+    )
+    target_include_directories(fuzz_projectjson PRIVATE
+        ${WEKDE_SRC_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(fuzz_projectjson PRIVATE
+        Qt6::Core
+        Qt6::Gui
+    )
+    target_compile_options(fuzz_projectjson PRIVATE -fsanitize=fuzzer)
+    target_link_options(fuzz_projectjson PRIVATE -fsanitize=fuzzer)
+
+    message(STATUS "Fuzzing targets enabled (Clang with -fsanitize=fuzzer)")
+endif()
+target_sources(${PROJECT_NAME} PRIVATE FallbackRenderer.cpp)
