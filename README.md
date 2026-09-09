@@ -1,74 +1,61 @@
-# Wallpaper Engine for KDE
+# plasma-wallpaper-engine
+
+> **Fork of [CaptSilver/wallpaper-engine-kde-plugin](https://github.com/CaptSilver/wallpaper-engine-kde-plugin)**  
+> Focus: plasmashell safety, stability, and defensive integration with KDE Plasma 6.
 
 Live wallpapers from [Wallpaper Engine](https://store.steampowered.com/app/431960/Wallpaper_Engine), running natively in KDE Plasma 6. Scene, Web, and Video wallpapers all work, drawn by a custom Vulkan renderer — no emulation, no Windows code involved.
 
-This is the actively maintained continuation of the original [catsout](https://github.com/catsout/wallpaper-engine-kde-plugin) plugin, rebuilt for Plasma 6 and Qt 6 with the old Python dependency gone for good.
+This fork builds on [CaptSilver/wallpaper-engine-kde-plugin](https://github.com/CaptSilver/wallpaper-engine-kde-plugin) with an emphasis on **safety-first integration**: protecting plasmashell from crashes, resource exhaustion, and misbehaving wallpapers.
 
-📖 **Full documentation lives in the [Wiki](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki).** This README is just enough to get you running.
+📖 Upstream documentation: [CaptSilver Wiki](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki)
+
+## License
+
+**GPL-2.0** — same as upstream. See [LICENSE](./LICENSE) for the full text.
+
+## ⚠️ Safety Limitations
+
+This project works as a **KDE Plasma wallpaper plugin**. By design, it integrates deeply with the Plasma desktop environment. Current known limitations:
+
+- **No plasmashell crash isolation yet** — misbehaving wallpapers can still crash plasmashell.
+- **Renderer runs in-process** with the Plasma shell (Vulkan scene renderer, mpv/libmpv for video, Qt WebEngine for web wallpapers).
+- **Resource usage is unbounded** — large scenes, high-framerate video wallpapers, or heavy Web wallpapers may degrade desktop responsiveness.
+- **Steam integration is required** — Wallpaper Engine must be installed via Steam; wallpapers are loaded from the Steam library.
+
+### What this fork aims to improve
+
+| Area | Status |
+|------|--------|
+| Out-of-process rendering / sandboxing | Planned |
+| Graceful wallpaper fallback on error | Planned |
+| Resource limits (VRAM, CPU, FPS caps) | Planned |
+| Safe wallpaper enumeration (no crashes from corrupt assets) | Under review |
+| Per-wallpaper health metrics | Planned |
+
+**Do not deploy on production/critical machines until safety milestones are reached.**
 
 ## Install
 
-**Arch (AUR)** — the easy path:
+**⚠️ Development fork — no stable releases yet.** Build from source:
 
 ```sh
-yay -S wallpaper-engine-kde-plugin-new-fork
+git clone --recurse-submodules https://github.com/cyber-g0d/plasma-wallpaper-engine.git
+cd plasma-wallpaper-engine
+git checkout dev/plasmashell-safety
+cmake -B build -S .
+cmake --build build
 ```
 
-**Fedora / Bazzite / rpm-ostree** — grab the RPM from [Releases](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/releases):
+For upstream stable releases, use [CaptSilver/wallpaper-engine-kde-plugin](https://github.com/CaptSilver/wallpaper-engine-kde-plugin).
 
-```sh
-sudo dnf install ./wallpaper-engine-kde-plugin-qt6-*.rpm    # Fedora
-rpm-ostree install ./wallpaper-engine-kde-plugin-qt6-*.rpm  # Bazzite / Silverblue
-```
+## Upstream
 
-**Ubuntu / Debian** — grab the `.deb` from [Releases](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/releases). You'll need Ubuntu 25.04+ or Debian Trixie+ (anything older ships a Qt that's too old):
-
-```sh
-sudo apt install ./wallpaper-engine-kde-plugin_*.deb
-```
-
-**Building from source?** That's all in the wiki: [Installation](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki/Installation).
-
-## Set it up
-
-1. Install [Wallpaper Engine](https://store.steampowered.com/app/431960/Wallpaper_Engine) on Steam and subscribe to a few wallpapers from the Workshop.
-2. Right-click the desktop → **Configure Desktop and Wallpaper**.
-3. Set **Wallpaper Type** to **Wallpaper Engine for KDE**.
-4. Point **Steam Library** at the folder that holds your `steamapps` directory. Usually that's `~/.local/share/Steam`, including on Bazzite, which ships Steam natively rather than as a Flatpak. If you did install Steam as a Flatpak, point at `~/.var/app/com.valvesoftware.Steam/.local/share/Steam` instead.
-5. Pick a wallpaper and hit **Apply**.
-
-Not sure which folder to point at? This lists every Steam library on disk:
-
-```sh
-find $HOME /run/media -maxdepth 6 -name steamapps -type d 2>/dev/null
-```
-
-Multi-monitor, per-screen settings, and playlists are covered in [Usage](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki/Usage).
-
-## What works
-
-| Type | Rendered by | Needs |
-|---|---|---|
-| **Scene** (2D/3D) | custom Vulkan renderer | Wallpaper Engine assets |
-| **Web** (HTML/JS) | QtWebEngine | Wallpaper Engine assets |
-| **Video** | MPV, or GStreamer as fallback | a video file |
-
-The Scene renderer handles most of what Wallpaper Engine throws at it: particles, post-processing, SceneScript, audio reactivity, and text layers. The full feature breakdown is in [Scene Renderer](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki/Scene-Renderer).
-
-## Requirements
-
-To run it: KDE Plasma 6, Qt 6, and a working Vulkan 1.1+ driver (AMD users want RADV). Building from source also needs a C++20 compiler — Clang is what we build with.
-
-## Something not working?
-
-[Troubleshooting](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki/Troubleshooting) and [Known Issues](https://github.com/CaptSilver/wallpaper-engine-kde-plugin/wiki/Known-Issues) cover the common ones — empty wallpaper lists, black desktops, missing audio.
+- **Original:** [catsout/wallpaper-engine-kde-plugin](https://github.com/catsout/wallpaper-engine-kde-plugin) (archived)
+- **Active upstream:** [CaptSilver/wallpaper-engine-kde-plugin](https://github.com/CaptSilver/wallpaper-engine-kde-plugin)
+- **This fork:** [cyber-g0d/plasma-wallpaper-engine](https://github.com/cyber-g0d/plasma-wallpaper-engine)
 
 ## Contributing
 
-PRs are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the local build-and-test gate and a few house rules.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and [ROADMAP.md](./ROADMAP.md).
 
-## Credits
-
-Standing on the shoulders of [catsout](https://github.com/catsout/wallpaper-engine-kde-plugin)'s original plugin (no longer maintained) and the intermediate [RainyPixel](https://github.com/rainypixel/wallpaper-engine-kde-plugin) fork. Asset-format reference from [RePKG](https://github.com/notscuffed/repkg). Licensed GPL-2.0.
-
-Wallpaper Engine itself is a separate, proprietary app — this project isn't affiliated with or endorsed by its developers.
+> **Note:** Code patches are not accepted until upstream sources have been reviewed and reproducible tests exist for the targeted behavior. See [ROADMAP.md](./ROADMAP.md) for the review schedule.

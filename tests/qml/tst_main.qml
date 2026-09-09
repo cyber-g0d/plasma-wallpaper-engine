@@ -506,4 +506,129 @@ TestCase {
         bg.runCacheGc();
         compare(fh.requestCacheGcCount, 0);
     }
+    // ── Per-wallpaper override precedence (Phase 2) ───────────────────────────
+    // Verifies that get_opt_value() in main.qml respects per-wallpaper
+    // overrides for fps and disable_mouse, falling back to global defaults
+    // when no override is set.
+
+    function test_get_opt_value_fps_override() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = { fps: 10 };
+        compare(bg.get_opt_value("fps", 30), 10);
+    }
+
+    function test_get_opt_value_fps_fallsBackToGlobal() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = {};
+        compare(bg.get_opt_value("fps", 30), 30);
+        bg.curOpt = { other_key: 42 };
+        compare(bg.get_opt_value("fps", 30), 30);
+    }
+
+    function test_get_opt_value_disableMouse_override() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        // disable_mouse: true → get_opt_value returns true
+        bg.curOpt = { disable_mouse: true };
+        compare(bg.get_opt_value("disable_mouse", false), true);
+    }
+
+    function test_get_opt_value_disableMouse_fallsBackToFalse() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = {};
+        compare(bg.get_opt_value("disable_mouse", false), false);
+        bg.curOpt = { fps: 30 };
+        compare(bg.get_opt_value("disable_mouse", false), false);
+    }
+
+    function test_get_opt_value_multipleOverrides() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = { fps: 15, disable_mouse: true };
+        compare(bg.get_opt_value("fps", 30), 15);
+        compare(bg.get_opt_value("disable_mouse", false), true);
+    }
+
+    function test_fps_binding_returnsOverrideWhenCurOptHasFps() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        // The fps property is a binding: get_opt_value('fps', globalFps).
+        // Setting curOpt should make fps resolve from the override.
+        bg.curOpt = { fps: 10 };
+        // Binding evaluation is lazy — touch the property to force a read
+        compare(bg.fps, 10);
+    }
+
+    function test_fps_binding_fallsBackToGlobalWhenOverrideMissing() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = {};
+        // fps binding should fall back to the global config value.
+        // wallpaper.configuration.Fps defaults to 30 (main.xml).
+        compare(bg.fps, 30);
+    }
+
+    function test_mouseInput_binding_disabledWhenOverrideSet() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        // mouseInput binding: !get_opt_value('disable_mouse', false) && wallpaper.configuration.MouseInput
+        // wallpaper.configuration.MouseInput defaults to true (main.xml)
+        bg.curOpt = { disable_mouse: true };
+        compare(bg.mouseInput, false);
+    }
+
+    function test_mouseInput_binding_enabledWhenNoOverride() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = {};
+        // Global MouseInput is true by default
+        compare(bg.mouseInput, true);
+    }
+
+    function test_mouseInput_binding_disabledWhenGlobalOff() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = {};
+        // Temporarily flip global MouseInput off
+        wallpaper.configuration.MouseInput = false;
+        compare(bg.mouseInput, false);
+        // Restore
+        wallpaper.configuration.MouseInput = true;
+    }
+
+    function test_mouseInput_binding_disabledWhenGlobalOffEvenWithoutOverride() {
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        bg.curOpt = { disable_mouse: false };
+        wallpaper.configuration.MouseInput = false;
+        compare(bg.mouseInput, false);
+        wallpaper.configuration.MouseInput = true;
+    }
+
+    function test_perOpt_loadedFromPyextSettlesIntoCurOpt() {
+        // Simulate the onWorkshopidChanged async path: pyext reads config,
+        // promise resolves, curOpt gets the result.
+        const bg = _findBackground();
+        if (!bg) { verify(loadError !== ""); return; }
+        const pyext = _findPyext(bg);
+        if (!pyext) {
+            // Pyext stub is present but FileHelper may not be exposed —
+            // skip rather than fail (the integration harness covers this).
+            skip("Pyext not available for per-wallpaper config read");
+            return;
+        }
+        // Pre-populate the stub's wallpaper config
+        const fh = pyext.helper;
+        if (fh && typeof fh.setWallpaperConfig === "function") {
+            fh.setWallpaperConfig("test_fps_override", { fps: 45, disable_mouse: true });
+            pyext.read_wallpaper_config("test_fps_override").then(function(res) {
+                bg.curOpt = res;
+                compare(bg.get_opt_value("fps", 30), 45);
+                compare(bg.get_opt_value("disable_mouse", false), true);
+            });
+        }
+    }
 }

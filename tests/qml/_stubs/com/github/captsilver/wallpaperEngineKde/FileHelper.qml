@@ -11,6 +11,10 @@ QtObject {
     property var _patchedHtmlReturns: ""
     property var _scanVideoFolderReturns: []
     property var _wallpaperConfigReturns: ({})
+    // Per-id wallpaper config map for test pre-population. Tests call
+    // setWallpaperConfig(id, cfg) to seed, then readWallpaperConfig(id)
+    // returns the stored config (or {} if never set).
+    property var _wallpaperConfigStore: ({})
 
     signal thumbnailReady(string videoPath, string outPath, bool ok)
     signal dirSizeReady(string path, real bytes)
@@ -53,9 +57,14 @@ QtObject {
     function qwebChannelSource()         { return ""; }
     function getDirSize(path, depth)     { getDirSizeCount += 1; return 0; }
     function getFolderList(path, opt)    { getFolderListCount += 1; return []; }
+    function setWallpaperConfig(id, cfg) {
+        _wallpaperConfigStore[id] = cfg || {};
+    }
     function readWallpaperConfig(id)     {
         readWallpaperConfigCount += 1;
         lastReadWallpaperConfigId = id;
+        if (_wallpaperConfigStore.hasOwnProperty(id))
+            return _wallpaperConfigStore[id];
         return _wallpaperConfigReturns;
     }
     function writeWallpaperConfig(id, c) {

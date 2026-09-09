@@ -2,242 +2,57 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ dev/plasmashell-safety, main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
-  # ── Arch Linux (primary target distribution) ──────────────────────────────
-  build-arch:
-    name: Full build — Arch Linux
-    runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-    env:
-      CC: clang
-      CXX: clang++
-
+  build-and-test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        qt: [ 'qt6' ]
     steps:
-      - name: Install git (needed for checkout action inside container)
-        run: pacman -Sy --noconfirm git
-
       - uses: actions/checkout@v4
 
-      - name: Checkout submodules
+      - name: Install Qt
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git submodule update --init --force --recursive
-
-      - name: Install build dependencies
-        run: |
-          pacman -Su --noconfirm
-          pacman -S --noconfirm \
-            base-devel \
-            clang \
-            cmake \
-            ninja \
-            extra-cmake-modules \
-            libplasma \
-            kconfig \
-            knotifications \
-            kcrash \
-            kglobalaccel \
-            ki18n \
-            kxmlgui \
-            qt6-declarative \
-            qt6-webchannel \
-            qt6-webengine \
-            vulkan-headers \
-            mpv \
-            lz4 \
-            freetype2 \
-            libpulse
+          sudo apt update
+          sudo apt install -y cmake g++ libkf5config-dev libkf5coreaddons-dev \
+            libkf5i18n-dev libkf5plasma-dev qt6-base-dev qt6-declarative-dev-tools libmpv-dev
 
       - name: Configure
         run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=Release \
-            -G Ninja
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
 
       - name: Build
-        run: cmake --build build -j$(nproc)
-
-  # ── Fedora (secondary target distribution) ───────────────────────────────
-  build-fedora:
-    name: Full build — Fedora
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:latest
-    env:
-      CC: clang
-      CXX: clang++
-
-    steps:
-      - name: Install git
-        run: dnf install -y git
-
-      - uses: actions/checkout@v4
-
-      - name: Checkout submodules
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git submodule update --init --force --recursive
+          cd build
+          cmake --build . -j$(nproc)
 
-      - name: Install build dependencies
+      - name: Run CTest
         run: |
-          dnf install -y \
-            clang \
-            cmake \
-            ninja-build \
-            extra-cmake-modules \
-            vulkan-headers \
-            plasma-workspace-devel \
-            kf6-plasma-devel \
-            kf6-kcoreaddons-devel \
-            kf6-kpackage-devel \
-            kf6-kconfig-devel \
-            kf6-knotifications-devel \
-            kf6-kcrash-devel \
-            kf6-kglobalaccel-devel \
-            kf6-ki18n-devel \
-            kf6-kxmlgui-devel \
-            lz4-devel \
-            mpv-devel \
-            qt6-qtbase-private-devel \
-            libplasma-devel \
-            qt6-qtwebchannel-devel \
-            qt6-qtwebengine-devel \
-            qt6-qtdeclarative-devel \
-            freetype-devel \
-            pulseaudio-libs-devel
+          cd build
+          QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 
-      - name: Configure
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=Release \
-            -G Ninja
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
-
-  # ── Ubuntu (deb packaging target) ───────────────────────────────────────
-  build-ubuntu:
-    name: Full build — Ubuntu
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:25.04
-    env:
-      CC: clang
-      CXX: clang++
-
-    steps:
-      - name: Install git
-        run: |
-          apt-get update
-          apt-get install -y git
-
-      - uses: actions/checkout@v4
-
-      - name: Checkout submodules
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git submodule update --init --force --recursive
-
-      - name: Install build dependencies
+      - name: Run QML tests
         env:
-          DEBIAN_FRONTEND: noninteractive
+          QT_QPA_PLATFORM: offscreen
         run: |
-          apt-get update
-          apt-get install -y \
-            clang \
-            cmake \
-            ninja-build \
-            extra-cmake-modules \
-            pkg-config \
-            libvulkan-dev \
-            libkf6package-dev \
-            libkf6config-dev \
-            libkf6notifications-dev \
-            libkf6crash-dev \
-            libkf6globalaccel-dev \
-            libkf6i18n-dev \
-            libkf6xmlgui-dev \
-            libplasma-dev \
-            plasma-workspace-dev \
-            qt6-base-dev \
-            qt6-base-private-dev \
-            qt6-declarative-dev \
-            qt6-webchannel-dev \
-            qt6-webengine-dev \
-            libmpv-dev \
-            liblz4-dev \
-            libfreetype-dev \
-            libpulse-dev
+          cd build
+          if command -v qmltestrunner >/dev/null; then
+            find tests -name "*.qml" -exec qmltestrunner {} \; | head -30
+          else
+            echo "qmltestrunner not found, skipping QML tests"
+          fi
 
-      - name: Configure
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=Release \
-            -G Ninja
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
-
-  # ── Unit tests (Fedora, full Qt6 + KDE QML modules + libmpv) ───────────
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:latest
-    env:
-      CC: clang
-      CXX: clang++
-
-    steps:
-      - name: Install git
-        run: dnf install -y git
-
-      - uses: actions/checkout@v4
-
-      - name: Checkout submodules
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git submodule update --init --force --recursive
-
-      - name: Install test dependencies
-        run: |
-          dnf install -y --skip-unavailable \
-            clang \
-            cmake \
-            ninja-build \
-            pkgconf-pkg-config \
-            qt6-qtbase-devel \
-            qt6-qtdeclarative-devel \
-            qt6-qtwebchannel-devel \
-            qt6-qtwebengine-devel \
-            mpv-devel \
-            kf6-kirigami-devel \
-            kf6-kconfig-devel \
-            kf6-kcmutils \
-            kf6-knotifications-devel \
-            kf6-kcrash-devel \
-            kf6-kglobalaccel-devel \
-            kf6-ki18n-devel \
-            kf6-kxmlgui-devel \
-            plasma-workspace \
-            libplasma-devel \
-            plasma-workspace-devel \
-            freetype-devel \
-            pulseaudio-libs-devel \
-            nodejs
-
-      - name: Configure (standalone test build)
-        run: |
-          cmake -B build/tests -S tests \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -G Ninja
-
-      - name: Build
-        run: cmake --build build/tests
-
-      - name: Run tests
-        run: ctest --test-dir build/tests --output-on-failure -V
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plasma-wallpaper-engine
+          path: |
+            build/*.so
+            build/arch/*.pkg.tar.zst

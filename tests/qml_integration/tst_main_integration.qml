@@ -115,4 +115,21 @@ TestCase {
         compare(Math.round(p.height), 608);
         m.destroy();
     }
+
+    // ── Regression: null-texture guard (Phase 1) ──────────────────────────
+    // Offscreen GL may not provide a valid default texture. TextureNode
+    // must not dereference nullptr on setTexture; it should degrade to
+    // transparent with a warning instead of SIGSEGV.
+    function test_scene_nocrash_null_texture() {
+        failOnWarning(/TextureNode.*default GL texture.*could not be created/);
+        _resetCfg();
+        wallpaper.configuration.SteamLibraryPath = "/tmp/fakelib";
+        wallpaper.configuration.WallpaperWorkShopId = "123";
+        wallpaper.configuration.WallpaperSource =
+            "/tmp/fakelib/steamapps/workshop/content/431960/123/scene.pkg+scene";
+        const m = _mkMain(1920, 1080);
+        // Verify we survived scene-graph sync without SIGSEGV.
+        // nativeAspectRatio is intentionally untouched (read-only — separate bug).
+        m.destroy();
+    }
 }

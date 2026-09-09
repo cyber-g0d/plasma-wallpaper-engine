@@ -48,6 +48,12 @@ public:
     // (~10 KB typical, a few MB for fat puppet definitions) while defeating
     // GB-scale DoS reads of /dev/zero or a sparse file.
     static constexpr qint64 kMaxReadSize = 64LL * 1024 * 1024;
+
+    // Maximum ACF (Steam Workshop manifest) file size readWorkshopManifest
+    // will parse.  A typical manifest with thousands of subscriptions is
+    // < 200 KB; 1 MiB is a generous ceiling that stops adversarial input
+    // (symlink to /dev/zero, crafted sparse file) from being read whole.
+    static constexpr qint64 kMaxAcfSize = 1LL * 1024 * 1024;
     // Synchronous, recursive directory byte total. `depth` semantics:
     //   depth <= 0  => UNLIMITED recursion (historical sentinel — note this is the
     //                  OPPOSITE of "current dir only"; kept for the public contract);
@@ -69,6 +75,41 @@ public:
     Q_INVOKABLE void         writeWallpaperConfig(const QString& id, const QVariantMap& changed);
     Q_INVOKABLE void         resetWallpaperConfig(const QString& id);
     Q_INVOKABLE QVariantList readActiveBindings(const QString& id);
+
+    // Read project.json for a wallpaper, parse general.properties into structured
+    // metadata, and merge saved per-wallpaper overrides from <id>.json.
+    //
+    // `id` is the wallpaper's workshop ID (used to look up saved overrides).
+    // `projectJsonPath` is the absolute native path to the wallpaper's project.json
+    // (canonicalised and allowlist-checked by readFile internally).
+    //
+    // Returns a QVariantList of property descriptors, each a QVariantMap with:
+    //   name     — property key (string)
+    //   type     — "bool", "combo", "slider", "color", "textinput", "file", "directory"
+    //   text     — display label (string, from project.json or capitalised key)
+    //   value    — current value (resolved: override > saved > project.json default)
+    //   default  — original project.json default value
+    //   min      — for slider: minimum (number, optional)
+    //   max      — for slider: maximum (number, optional)
+    //   step     — for slider: step increment (number, optional)
+    //   options  — for combo: array of {value, label} maps (optional)
+    //   fileType — for file: file-type filter hint ("video", "image", "sound"; optional)
+    //   condition — for visibility: raw condition string from project.json (optional)
+    //
+    // The `condition` field is preserved in the output for future visibility support
+    // (WPUserProperties::ResolveValue handles condition evaluation; see
+    // WPUserProperties.hpp for the supported expression form).  The form UI may grey
+    // out or hide controls when a condition does not match; that evaluation is
+    // NOT implemented yet — condition metadata is carried through so future work can
+    // add it without schema changes.
+    //
+    // Returns an empty list when:
+    //   - projectJsonPath does not exist or is outside the read allowlist
+    //   - the file cannot be read or is not valid JSON
+    //   - the JSON has no `general.properties` section
+    //   - the `general.properties` section is empty or not an object
+    Q_INVOKABLE QVariantList readWallpaperProperties(const QString& id,
+                                                      const QString& projectJsonPath);
 
     // Asynchronous thumbnail generation. Submits work to QThreadPool and emits
     // thumbnailReady when done. Concurrent requests for the same videoPath are

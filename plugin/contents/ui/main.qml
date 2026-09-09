@@ -23,13 +23,13 @@ Rectangle {
 
     property int    videoBackend: wallpaper.configuration.VideoBackend
     property int    switchTimer: wallpaper.configuration.SwitchTimer
-    property int    fps: wallpaper.configuration.Fps
+    property int    fps: get_opt_value('fps', wallpaper.configuration.Fps)
     // Swapchain present-mode policy (0=Auto / 1=Fifo / 2=FifoRelaxed / 3=Mailbox / 4=Immediate).
     // Pumped to backend/Scene.qml -> SceneViewer.presentMode -> SceneWallpaper.
     property int    presentMode: wallpaper.configuration.PresentMode
     property bool   randomizeWallpaper: wallpaper.configuration.RandomizeWallpaper
     property bool   noRandomWhilePaused: wallpaper.configuration.NoRandomWhilePaused
-    property bool   mouseInput: wallpaper.configuration.MouseInput
+    property bool   mouseInput: !get_opt_value('disable_mouse', false) && wallpaper.configuration.MouseInput
     property bool   animatedPreview: wallpaper.configuration.AnimatedPreview
     property bool   mpvStats: wallpaper.configuration.MpvStats
 
@@ -71,6 +71,7 @@ Rectangle {
 
     // Update all derived properties when curOpt changes
     onCurOptChanged: {
+        mouseInput = !get_opt_value('disable_mouse', false) && wallpaper.configuration.MouseInput;
         displayMode = get_opt_value('display_mode', wallpaper.configuration.DisplayMode);
         backgroundColor = get_opt_value('background_color', wallpaper.configuration.BackgroundColor);
         mute = get_opt_value('mute_audio', wallpaper.configuration.MuteAudio);

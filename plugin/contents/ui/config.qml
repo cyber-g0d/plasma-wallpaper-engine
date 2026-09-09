@@ -298,6 +298,9 @@ ColumnLayout {
         }
 
         SettingPage {
+            workshopId: root.cfg_WallpaperWorkShopId
+            pyext: root.pyext
+            workshopRoots: Common.getProjectDirs(root.cfg_SteamLibraryPath)
             id: settingPage
         }
 

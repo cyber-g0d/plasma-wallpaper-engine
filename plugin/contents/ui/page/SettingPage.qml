@@ -14,6 +14,27 @@ import org.kde.kirigami 2.6 as Kirigami
 Flickable {
     id: settingTab
 
+
+    // Per-wallpaper override support (Phase 2).  Populated by the config
+    // dialog (config.qml) — empty when no wallpaper is selected.
+    property string workshopId: ""
+    property var pyext: null
+    property var workshopRoots: []
+    // Resolve project.json path from workshop roots
+    readonly property string projectJsonPath: {
+        if (!workshopId || !Array.isArray(workshopRoots)) return "";
+        for (var i = 0; i < workshopRoots.length; i++) {
+            var root = workshopRoots[i];
+            if (!root || !root.path) continue;
+            var candidate = root.path + "/" + workshopId + "/project.json";
+            // Quick existence check via the model (workshopDirs carries 'valid' bool)
+            if (root.workshops && root.workshops.indexOf(workshopId) >= 0) {
+                return candidate;
+            }
+        }
+        return "";
+    }
+
     // Наследуем тему от родителя
     Kirigami.Theme.inherit: true
 
@@ -640,6 +661,203 @@ Flickable {
         }
     }
 
+    // Keep the debounce timer outside OptionGroup: its content property is
+    // a visual-item list and cannot contain the non-visual Timer object.
+    Timer {
+        id: perOptWriteTimer
+        interval: 300
+        repeat: false
+        onTriggered: {
+            if (!settingTab.workshopId || !settingTab.pyext) return;
+            settingTab.pyext.write_wallpaper_config(settingTab.workshopId, perWallpaperGroup.perOpt);
+            if (typeof cfg_PerOptChanged !== "undefined")
+                cfg_PerOptChanged = cfg_PerOptChanged + 1;
+        }
+    }
+
+    // Connections is non-visual too; keep it outside OptionGroup's visual
+    // content list, just like the debounce Timer above.
+    Connections {
+        target: settingTab
+        function onWorkshopIdChanged() {
+            if (!settingTab.workshopId || !settingTab.pyext) {
+                perWallpaperGroup.perOpt = {};
+                return;
+            }
+            settingTab.pyext.read_wallpaper_config(settingTab.workshopId)
+                .then(function(res) {
+                    perWallpaperGroup.perOpt = (res && typeof res === "object") ? res : {};
+                });
+        }
+    }
+
+    // ── Per-Wallpaper Overrides ────────────────────────────────────────────────
+    // Visible only when a wallpaper is selected (workshopId is set).
+    // Reads/writes <id>.json in configDir/wallpaper/ through FileHelper.
+    OptionGroup {
+        id: perWallpaperGroup
+        Layout.fillWidth: true
+        visible: settingTab.workshopId !== ""
+
+        header.text: i18nc("@title:group per-wallpaper override settings", "Per-Wallpaper Settings")
+        header.text_color: Kirigami.Theme.textColor
+        header.icon: '../../images/tuning.svg'
+        header.color: Kirigami.Theme.activeBackgroundColor
+
+        // Internal state — loaded from <workshopId>.json on workshopId change
+        property var perOpt: ({})
+        function scheduleWrite() { perOptWriteTimer.restart(); }
+
+        // Load per-wallpaper config when the selected wallpaper changes
+        onVisibleChanged: {
+            if (!visible) { perOpt = {}; return; }
+            if (!settingTab.pyext) return;
+            settingTab.pyext.read_wallpaper_config(settingTab.workshopId)
+                .then(function(res) { perOpt = (res && typeof res === "object") ? res : {}; });
+        }
+
+        OptionItem {
+            visible: libcheck.wallpaper
+            text: i18nc("@label per-wallpaper fps override", "Override FPS")
+            text_color: Kirigami.Theme.textColor
+            icon: '../../images/tuning.svg'
+            // "Use global" switch — when off, the global Fps slider applies.
+            // When on, this slider overrides.
+            actor: RowLayout {
+                Switch {
+                    id: ckbox_overrideFps
+                    checked: perWallpaperGroup.perOpt.hasOwnProperty("fps")
+                    onCheckedChanged: {
+                        if (!perWallpaperGroup.perOpt) return;
+                        if (checked) {
+                            perWallpaperGroup.perOpt.fps = spin_perWallpaperFps.value;
+                        } else {
+                            delete perWallpaperGroup.perOpt.fps;
+                        }
+                        perWallpaperGroup.scheduleWrite();
+                    }
+                }
+                SpinBox {
+                    id: spin_perWallpaperFps
+                    enabled: ckbox_overrideFps.checked
+                    from: 5
+                    to: 60
+                    stepSize: 1
+                    value: (perWallpaperGroup.perOpt && perWallpaperGroup.perOpt.fps) ? perWallpaperGroup.perOpt.fps : cfg_Fps
+                    onValueChanged: {
+                        if (!ckbox_overrideFps.checked) return;
+                        if (!perWallpaperGroup.perOpt) return;
+                        perWallpaperGroup.perOpt.fps = value;
+                        perWallpaperGroup.scheduleWrite();
+                    }
+                }
+            }
+            contentBottom: ColumnLayout {
+                Text {
+                    Layout.fillWidth: true
+                    color: Kirigami.Theme.disabledTextColor
+                    text: i18nc("@info per-wallpaper fps help text",
+                        "When enabled, this wallpaper uses the FPS set here instead of the global FPS. Range: 5–60. Lower values save GPU/battery on static wallpapers.")
+                    wrapMode: Text.Wrap
+                }
+            }
+        }
+
+        OptionItem {
+            visible: libcheck.wallpaper
+            text: i18nc("@label per-wallpaper disable mouse", "Disable Mouse Input")
+            text_color: Kirigami.Theme.textColor
+            icon: '../../images/mouse.svg'
+            actor: Switch {
+                id: ckbox_disableMouse
+                checked: perWallpaperGroup.perOpt && perWallpaperGroup.perOpt.disable_mouse === true
+                onCheckedChanged: {
+                    if (!perWallpaperGroup.perOpt) return;
+                    if (checked) {
+                        perWallpaperGroup.perOpt.disable_mouse = true;
+                    } else {
+                        delete perWallpaperGroup.perOpt.disable_mouse;
+                    }
+                    perWallpaperGroup.scheduleWrite();
+                }
+            }
+            contentBottom: ColumnLayout {
+                Text {
+                    Layout.fillWidth: true
+                    color: Kirigami.Theme.disabledTextColor
+                    text: i18nc("@info per-wallpaper disable mouse help text",
+                        "When enabled, mouse events are NOT forwarded to this wallpaper regardless of the global Mouse Input setting. Useful for interactive wallpapers that would interfere with desktop clicks.")
+                    wrapMode: Text.Wrap
+                }
+            }
+        }
+
+        // ── User Properties from project.json ──────────────────────────
+        OptionItem {
+            visible: libcheck.wallpaper
+            text: i18nc("@label settings option per-wallpaper properties toggle", "Show Wallpaper Properties")
+            text_color: Kirigami.Theme.textColor
+            icon: '../../images/tuning.svg'
+            actor: Switch {
+                id: ckbox_showWallpaperProps
+                checked: false
+            }
+        }
+
+        Loader {
+            id: wallpaperPropsLoader
+            Layout.fillWidth: true
+            active: ckbox_showWallpaperProps.checked && settingTab.workshopId !== ""
+            visible: active
+            sourceComponent: Component {
+                UserPropertiesForm {
+                    id: userPropsForm
+                    workshopId: settingTab.workshopId
+                    pyext: settingTab.pyext
+                    projectJsonPath: settingTab.projectJsonPath
+                    // When a property changes, bump cfg_PerOptChanged so the
+                    // runtime re-reads and applies the new value.
+                    onPropChanged: function(key, val) {
+                        if (typeof cfg_PerOptChanged !== "undefined")
+                            cfg_PerOptChanged = cfg_PerOptChanged + 1;
+                    }
+                    onPropsReset: {
+                        if (typeof cfg_PerOptChanged !== "undefined")
+                            cfg_PerOptChanged = cfg_PerOptChanged + 1;
+                    }
+                }
+            }
+        }
+
+        // Summary line + Reset button
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 8
+            Button {
+                text: i18nc("@action:button reset per-wallpaper overrides", "Reset Overrides")
+                enabled: perWallpaperGroup.perOpt && Object.keys(perWallpaperGroup.perOpt).length > 0
+                onClicked: {
+                    if (!settingTab.pyext || !settingTab.workshopId) return;
+                    settingTab.pyext.reset_wallpaper_config(settingTab.workshopId);
+                    perWallpaperGroup.perOpt = {};
+                    // Signal runtime to re-read (no overrides left)
+                    if (typeof cfg_PerOptChanged !== "undefined")
+                        cfg_PerOptChanged = cfg_PerOptChanged + 1;
+                }
+            }
+            Item { Layout.fillWidth: true }
+        // TODO (Phase 3 — audio-reactive / parallax per-wallpaper overrides):
+        //  - audio_reactive: false — disables System Audio Capture for this wallpaper
+        //    only (upstream API: setWallpaperProperty("audioresponsive", false) in
+        //    user.css in the Workshop ecosystem; not yet exposed as a KConfig entry)
+        //  - parallax: { enabled: true, factor: 0.02 } — per-wallpaper parallax
+        //    depth (upstream API: project.json "parallax" object; no renderer-side
+        //    hook exists yet in SceneWallpaper)
+        //  These require upstream API reverse-engineering; until then, only fps and
+        //  disable_mouse are supported in the per-wallpaper override UI.
+        //  See: src/backend_scene/src/SceneWallpaper.cpp for current property surface.
+        }
+    }
     // Dialog lives at Flickable root — OptionGroup's `content` is a
     // QQuickItem-only list and Dialog (a Popup) can't sit inside it.
     Dialog {
