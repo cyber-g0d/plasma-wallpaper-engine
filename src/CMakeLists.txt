@@ -158,3 +158,4 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CROSSCOMPILING)
 
     message(STATUS "Fuzzing targets enabled (Clang with -fsanitize=fuzzer)")
 endif()
+target_sources(${PROJECT_NAME} PRIVATE FallbackRenderer.cpp)
