@@ -62,7 +62,7 @@ Item {
         // the bridge dedupes true->true, and a swallowed edge means nobody
         // reads the new project.json and the page renders its built-in
         // defaults instead of the user's values.
-        webobj.setLoaded(false);
+        if (webobj) webobj.loaded = false;
 
         var filePath = Common.urlNative(fileUrl);
         var baseUrl = fileUrl.substring(0, fileUrl.lastIndexOf('/') + 1);
@@ -107,7 +107,7 @@ Item {
             }
             if (Object.keys(delta).length > 0) {
                 console.log("[WEK] Sending updated user properties:", JSON.stringify(Object.keys(delta)));
-                webobj.pushUserProperties(fresh);
+                webobj.userProperties = fresh;
                 // pushUserProperties fires sigUserProperties(fresh) — but the
                 // existing contract was to fire sigUserProperties(delta), not the
                 // full map. Preserve that by firing the delta-flavoured signal
@@ -124,7 +124,7 @@ Item {
         if (webobj.loaded) {
             var g = JSON.parse(JSON.stringify(webobj.generalProperties || {}));
             g.fps = webItem.fps;
-            webobj.pushGeneralProperties(g);
+            webobj.generalProperties = g;
             // pushGeneralProperties auto-fires sigGeneralProperties(g).
         }
     }
@@ -156,7 +156,7 @@ Item {
         onLoadedChanged: {
             if (!loaded) return;  // only react to false->true (lifecycle thaws are silent)
             if (!webobj.generalProperties || Object.keys(webobj.generalProperties).length === 0)
-                webobj.pushGeneralProperties({fps: 24});
+                webobj.generalProperties = {fps: 24};
             var wpDir = Common.urlNative(webItem.source.toString());
             wpDir = wpDir.substring(0, wpDir.lastIndexOf('/'));
             // Load user properties from project.json BEFORE signaling,
@@ -177,8 +177,8 @@ Item {
                 console.log("[WEK] project.json loaded, properties:", JSON.stringify(Object.keys(userProps)));
                 // pushUserProperties + pushGeneralProperties each fire their
                 // matching sig* signal automatically — no explicit emit needed.
-                webobj.pushUserProperties(userProps);
-                webobj.pushGeneralProperties(webobj.generalProperties || {fps: 24});
+                webobj.userProperties = userProps;
+                webobj.generalProperties = webobj.generalProperties || {fps: 24};
             });
         }
     }
@@ -296,6 +296,7 @@ Item {
             settings.showScrollBars = false;
 
             settings.localContentCanAccessRemoteUrls = true;
+            settings.localContentCanAccessFileUrls = true;
             // Geolocation + other dangerous features are NOT auto-granted;
             // see onFeaturePermissionRequested + permissionHandler below.
             _init = true;
@@ -334,8 +335,8 @@ Item {
                 // The bridge dedupes redundant true->true transitions and
                 // fires sigInit once per document, so in-page navs that
                 // re-fire LoadSucceededStatus are harmless.
-                if (webobj && typeof webobj.setLoaded === "function")
-                    webobj.setLoaded(true);
+                if (webobj)
+                    webobj.loaded = true;
                 // check pause after load
                 if(paused) {
                     webItem.play();
@@ -496,7 +497,7 @@ Item {
             // The renderer dies with the document, so stop reporting a live
             // page: fps, user-property and audio pushes are all gated on
             // loaded and have nowhere to go until the resume reloads.
-            webobj.setLoaded(false);
+            if (webobj) webobj.loaded = false;
             console.log("[WEK] WebEngineView escalated to Discarded after long pause");
         }
     }

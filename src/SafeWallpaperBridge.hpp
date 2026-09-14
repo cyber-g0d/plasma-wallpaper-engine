@@ -40,9 +40,9 @@ namespace wekde
 // carries the matching comment on the QML side.
 class SafeWallpaperBridge : public QObject {
     Q_OBJECT
-    Q_PROPERTY(QVariantMap generalProperties READ generalProperties NOTIFY generalPropertiesChanged)
-    Q_PROPERTY(QVariantMap userProperties READ userProperties NOTIFY userPropertiesChanged)
-    Q_PROPERTY(bool loaded READ loaded NOTIFY loadedChanged)
+    Q_PROPERTY(QVariantMap generalProperties READ generalProperties WRITE pushGeneralProperties NOTIFY generalPropertiesChanged)
+    Q_PROPERTY(QVariantMap userProperties READ userProperties WRITE pushUserProperties NOTIFY userPropertiesChanged)
+    Q_PROPERTY(bool loaded READ loaded WRITE setLoaded NOTIFY loadedChanged)
 
 public:
     explicit SafeWallpaperBridge(QObject* parent = nullptr);
